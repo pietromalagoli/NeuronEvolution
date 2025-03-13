@@ -1,0 +1,129 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib import cm   # colormap
+from matplotlib.ticker import LinearLocator     # for having ticks evenly spaced on the axis
+
+# I quickly create a class so that I can have some utility methods here
+class SolutionArray(np.ndarray):
+    @property       # sol.x returns an array of all the x values of sol
+    def x(self):
+        return self[:, 0]
+
+    @x.setter
+    def x(self, value):
+        self[:, 0] = value
+
+    @property
+    def y(self):
+        return self[:, 1]
+
+    @y.setter
+    def y(self, value):
+        self[:, 1] = value
+        
+# Evolutionary algorithm - mutation of the survivors and random generation of the remaining
+def ep2d(f,par:dict):
+    
+    # Initialization
+    N = par['N']
+    coord_range = par['coord_range']
+    sol_ratio = par['sol_ratio']
+    mutation_ratio = par['mutation_ratio']
+    seed = par['seed']
+    n_iter = par['n_iter']
+
+    x = np.linspace(coord_range[0],coord_range[1],N)
+    y = np.linspace(coord_range[0],coord_range[1],N)
+    X,Y = np.meshgrid(x,y)
+    
+    # Create the containers for the mean and the maxima
+    mean_ev = []
+    max_ev = []
+    
+    # generate the initial solutions set
+    np.random.seed(seed)
+    N_sol = int(N*sol_ratio)
+    idx = np.random.randint(0,N,N_sol,dtype=int)   # I start with N/5 uniformly distributed points, so not to add any starting bias to the search
+    idy = np.random.randint(0,N,N_sol,dtype=int)
+
+    # Extract the solutions
+    sol = np.array([(xx, yy) for xx, yy in zip(X[idx, idx], Y[idy, idy])]).view(SolutionArray)
+    
+    # plot the generation
+    plot_generation(sol,title=f'Initial generation',X=X,Y=Y,f=f)
+    
+    for iter in range(n_iter):
+        # evaluate the mean over the set of solutions
+        running_mean = np.sum(f(sol.x,sol.y)) / N_sol
+        running_maxima = np.max(f(sol.x,sol.y))
+        mean_ev.append(running_mean)
+        max_ev.append(running_maxima)
+
+        # discard elements in sol whose fitness value is below average
+        sol = sol[f(sol.x,sol.y) >= running_mean]
+        
+        # generate the mutation radius 
+        mutationx = np.random.uniform(-max(x)*mutation_ratio, max(x)*mutation_ratio, len(sol))
+        mutationy = np.random.uniform(-max(y)*mutation_ratio, max(y)*mutation_ratio, len(sol))
+
+        # mutate
+        sol.x = sol.x + mutationx
+        sol.x = np.array([xx if xx >= 0 else 0 for xx in sol.x])    # if any element would exit the boundaries, set it to the corresponding boundary
+        sol.x = np.array([xx if xx <= max(x) else max(x) for xx in sol.x])
+        sol.y = sol.y + mutationy
+        sol.y = np.array([yy if yy >= 0 else 0 for yy in sol.y])
+        sol.y = np.array([yy if yy <= max(y) else max(y) for yy in sol.y])
+        
+        # generate the remaining at random
+        remaining_x = x[np.random.randint(0, N, N_sol - len(sol))]
+        remaining_y = y[np.random.randint(0, N, N_sol - len(sol))]
+        remaining = np.array([[xx,yy] for xx,yy in zip(remaining_x,remaining_y)])
+
+        sol = np.concatenate([sol,remaining]).view(SolutionArray)
+
+        # Plot generation function
+        plot_generation(sol,title=f'Generation #{iter+1} \n mean={running_mean}',X=X,Y=Y,f=f)
+        
+    return mean_ev, max_ev
+        
+# Function for plotting the generation
+def plot_generation(sol:SolutionArray,title:str,X,Y,f):
+    
+    fig= plt.figure(figsize=(12,6))
+    fig.suptitle(title)
+
+    # First subplot (3d view)
+    ax = fig.add_subplot(1,2,1,projection='3d')
+    surf = ax.plot_surface(X, Y, f(X,Y), cmap=cm.coolwarm, linewidth=0, antialiased=False,alpha=0.3)
+
+    # Customize the z axis.
+    ax.zaxis.set_major_locator(LinearLocator(10))
+    ax.set_zlim(0.0)
+    # A StrMethodFormatter is used automatically
+    ax.zaxis.set_major_formatter('{x:.02f}')
+
+    # Add axis labels
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('f(x,y)')
+
+    # add the generated (initial) solutions
+    ax.scatter(sol.x,sol.y,f(sol.x,sol.y),marker='^',c='g',label='Solutions')
+    
+    plt.legend()
+
+    # Second subplot (2d view)
+    ax = fig.add_subplot(1,2,2)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    levels = np.linspace(0,1,30)
+    contour = ax.contourf(X,Y,f(X,Y),cmap=cm.coolwarm, antialiased=False,levels=levels,alpha=0.8)
+    ax.scatter(sol.x,sol.y,marker='^',c='g',s=15,label='Solutions')
+    ax.scatter(X[np.argmax(f(X,Y)[0]),np.argmax(f(X,Y)[0])],Y[np.argmax(f(X,Y)[0]),np.argmax(f(X,Y)[0])],marker='x',c='black',label='f_max')
+    # Add a color bar which maps values to colors.
+    fig.colorbar(contour, shrink=0.5, aspect=5,label='f(x,y)')
+
+    plt.legend()
+    plt.show()
