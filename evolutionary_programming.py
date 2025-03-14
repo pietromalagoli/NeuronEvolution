@@ -105,8 +105,8 @@ def ep2d(f,par:dict,verb:int=0):
     X,Y = np.meshgrid(x,y)
     
     # Create the containers for the mean and the maxima
-    mean_ev = []
-    max_ev = []
+    mean_ev = np.zeros(n_iter)
+    max_ev = np.zeros(n_iter)
     
     # generate the initial solutions set
     np.random.seed(seed)
@@ -120,12 +120,12 @@ def ep2d(f,par:dict,verb:int=0):
     # plot the generation
     plot_generation(sol,title=f'Initial generation',X=X,Y=Y,f=f)
     
-    for iter in range(1,n_iter+1):
+    for iter in range(n_iter):
         # evaluate the mean over the set of solutions
         running_mean = np.sum(f(sol.x,sol.y)) / N_sol
         running_maxima = np.max(f(sol.x,sol.y))
-        mean_ev.append(running_mean)
-        max_ev.append(running_maxima)
+        mean_ev[iter] = running_mean
+        max_ev[iter] = running_maxima
 
         # discard elements in sol whose fitness value is below average
         sol = sol[f(sol.x,sol.y) >= running_mean]
@@ -160,9 +160,15 @@ def ep2d(f,par:dict,verb:int=0):
             plot_generation(sol,title=f'Generation #{iter+1} \n mean={running_mean}',X=X,Y=Y,f=f)
         
         # Add an early stopping
-        if np.isclose(running_mean,np.max(f(x,y)),rtol=1e-3) and np.isclose(running_mean,np.array(mean_ev[iter-5:iter-1]).all(),rtol=1e-2):
+        if np.isclose(running_mean,np.max(f(x,y)),atol=1e-2) and np.isclose(running_mean,np.array(mean_ev[iter-5:iter-1]).all(),atol=1e-3):
             break
+    
+    # in the case of early stopping, cut the mean and max arrays at the stopped iteration
+    mean_ev = mean_ev[:iter]
+    max_ev = max_ev[:iter]
+    
     print(f'Convergence reached after {iter} iterations.')
+    plot_generation(sol,title=f'Generation #{iter} \n mean={running_mean}',X=X,Y=Y,f=f)
     return mean_ev, max_ev
         
 # Function for plotting the generation
