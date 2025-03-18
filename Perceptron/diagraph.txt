@@ -1,0 +1,43 @@
+digraph G {
+
+        rankdir=LR
+	splines=line
+        
+        node [label=""];
+
+        subgraph cluster_0 {
+		color=white;
+		node [style=solid,color=blue4, shape=circle];
+		x1 x2;
+		label = "Input layer";
+	}
+
+	subgraph cluster_1 {
+		color=white;
+		node [style=solid,color=red2, shape=circle];
+		a12 a22 a32;
+		label = "Intra Neurons";
+	}
+
+	subgraph cluster_2 {
+		color=white;
+		node [style=solid,color=seagreen2, shape=circle];
+		O;
+		label="Output layer";
+	}
+
+        x1 -> a12;
+        x1 -> a22;
+        x1 -> a32;
+        x1 -> O;
+        x2 -> a12;
+        x2 -> a22;
+        x2 -> a32;
+        x2 -> O;
+
+
+        a12 -> O
+        a22 -> O
+        a32 -> O
+
+}
