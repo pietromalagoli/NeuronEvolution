@@ -29,7 +29,7 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
     N = par['N']
     coord_range = par['coord_range']
     sol_ratio = par['sol_ratio']
-    mutation_ratio = par['mutation_ratio']
+    mutation_radius = par['mutation_radius']
     seed = par['seed']
     n_iter = par['n_iter']
 
@@ -70,10 +70,10 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
         m = N_sol - len(sol)
         
         # generate the mutation radius 
-        mutationx = np.random.uniform(-max(x)*mutation_ratio, max(x)*mutation_ratio, m)
-        mutationy = np.random.uniform(-max(y)*mutation_ratio, max(y)*mutation_ratio, m)
+        mutationx = np.random.uniform(-max(x)*mutation_radius, max(x)*mutation_radius, m)
+        mutationy = np.random.uniform(-max(y)*mutation_radius, max(y)*mutation_radius, m)
         
-        # Extract the parents between the survivors (here we can either take them randmìomly or take the fittest survivors)
+        # Extract the parents between the survivors (here we can either take them random or take the fittest survivors)
         # randomly
         parents_idx = np.random.randint(0,len(sol),m)
         parentsx = sol.x[parents_idx]
