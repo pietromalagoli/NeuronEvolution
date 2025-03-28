@@ -64,11 +64,11 @@ class Network:
         """
         self.neurons[0:2] = input   # set the value of the first two neurons to the input value
         for neuron in range(2,2+self.S+1):    # compute the value of the intra neurons by feed forward
-            self.neurons[neuron] = self.J[neuron,0] * self.neurons[0] + self.J[neuron,1] * self.neurons[1]   # I refer to the lower triangle of the matrix J
+            self.neurons[neuron] = self.C[neuron,0] * self.J[neuron,0] * self.neurons[0] + self.C[neuron,1] * self.J[neuron,1] * self.neurons[1]   # I refer to the lower triangle of the matrix J
             self.neurons[neuron] = self.activation(self.neurons[neuron],self.Theta[neuron])     # Activation
         out = 0.        # Initialize a variable for containing the value of the output neuron 
         for neuron in range(0,2+self.S+1):  # compute the value of the ouput
-            out += self.J[-1,neuron] * self.neurons[neuron]     # Add each neuron's weighted contribution to the output
+            out += self.C[-1,neuron] * self.J[-1,neuron] * self.neurons[neuron]     # Add each neuron's weighted contribution to the output
         self.neurons[-1] = self.activation(out,self.Theta[-1])     # activation
         output = self.neurons[-1]
         if verb > 0:
@@ -87,17 +87,18 @@ class Network:
                 output = self.ff(input)
                 squared_dist = (par['target_set'][i] - output)**2     # square distance between network output and target (theoretical) output
                 cost = (np.sum(self.C.flatten())/2) * self.S      # here the cost is computed only on the presence or absence of links
-                self.fitness += 20*squared_dist + cost # add to the fitness value of the network
+                self.fitness += 50*squared_dist + cost # add to the fitness value of the network
             self.fitness /= len(par['input_set'])    # normalize over the inputs
             
 ####### EVOLUTION ###########
-def evolution(par:dict,verb:int=0):
+def evolution(par:dict,verb:int=1,early_stop:bool=True):
     """This function implements the evolutionary algorithm utilizied to evolve the networks population.
 
     Args:
         par (dict): parameters of the simulation.
         verb (int, optional): verbosity. If == 0, nothing is printed on standard output, if == 1, number of children is printed each 100 iterations,
-                            if == 2, each 10 iterations. Defaults to 0.
+                            if == 2, each 10 iterations. Defaults to 1.
+        early_stop (bool, optional): early stopping option. Defaults to True.
 
     Returns:
         solutions, Fmean_values (np.ndarray): solutions = array of the final solutions of the algorithm. Fmean_values = array of mean fitness values for each iteration.
@@ -118,6 +119,10 @@ def evolution(par:dict,verb:int=0):
     for iter in range(par['n_iter']):
         # Compute the mean fitness
         mean_fit = np.sum([sol.fitness for sol in solutions]) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
+        # Save the old solution set for possible early stopping
+        solutions_old = []
+        for sol in solutions:
+            solutions_old.append(copy.deepcopy(sol))
         # Discard elements in sol whose fitness value is below average 
         solutions = np.array([sol for sol in solutions if sol.fitness <= mean_fit])  
         # Compute the number of discarded elements, m
@@ -137,6 +142,10 @@ def evolution(par:dict,verb:int=0):
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'# of childs: {len(offspring)}')
+        # Possible early stopping
+        if len(offspring) <= par['n_early_stop'] and early_stop == True:
+            print(f'Convergence reached after {iter} iterations.')
+            return solutions_old, Fmean_values
                 
         ## MUTATION
         for i,child in enumerate(offspring):
@@ -179,7 +188,7 @@ def evolution(par:dict,verb:int=0):
                     child.C = np.delete(child.C,obj=-1,axis=0) # delete the C values of the deleted neurons on axis 0
                     child.C = np.delete(child.C,obj=-1,axis=1) # delete the C values of the deleted neurons on axis 1                    
             # mutate (I mutate also the newly generated thetas)
-            mutationC = np.random.choice([0,1], len(child.C)**2).reshape(child.C.shape)   # generate the mutation radius 
+            mutationC = np.random.choice([0,1], len(child.C)**2,p=[0.2,0.8]).reshape(child.C.shape)   # generate the mutation radius 
             # Apply the mutation
             child.C = C0 * mutationC
             ## Mutate J
