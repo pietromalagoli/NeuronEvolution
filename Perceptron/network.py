@@ -81,7 +81,7 @@ class Network:
         Args:
             par (dict): parameters of the generation.
         """
-        if self.fitness == None:        # I need this check, bc otherwise I risk of adding fitness over fitness
+        if self.fitness == None:        # I need this check, bc otherwise I risk adding fitness over fitness
             self.fitness = 0.           # This is to avoid type conflict and to make sure that I'm not computing the fitness of a network that already has it
             for i,input in enumerate(par['input_set']):
                 output = self.ff(input)
