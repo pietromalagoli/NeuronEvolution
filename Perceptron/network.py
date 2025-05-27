@@ -177,6 +177,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
                 if theta > max(par['Theta_range']):
                     child.Theta[i] = max(par['Theta_range'])  
             ## Mutate C
+            # first check for S
             C0 = child.initJ()     # I utilize the method initJ() to create a new C given the new S
             if deltaS > 0:
                 for _ in range(deltaS):
@@ -187,7 +188,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
                 for _ in range(np.abs(deltaS)):
                     child.C = np.delete(child.C,obj=-1,axis=0) # delete the C values of the deleted neurons on axis 0
                     child.C = np.delete(child.C,obj=-1,axis=1) # delete the C values of the deleted neurons on axis 1                    
-            # mutate (I mutate also the newly generated thetas)
+            # then mutate C 
             mutationC = np.random.choice([0,1], len(child.C)**2,p=[0.2,0.8]).reshape(child.C.shape)   # generate the mutation radius 
             # Apply the mutation
             child.C = C0 * mutationC
