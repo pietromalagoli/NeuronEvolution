@@ -28,7 +28,7 @@ class NetworkParams(NamedTuple):
 # - FF(INPUT(S),NETPAR): FA IL 'FEED-FORWARD' DEL NETWORK DATO UN SET DI INPUT E RITORNA 
 #   LO STATE (OSSIA L'ARRAY DEGLI STATI 0 O 1 DELLE SINGOLE CELL)
     
-def generate(par:dict) -> NetworkParams:  # JAXXED!
+def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     """Generate a random network given the parameters par by updating the 
         NetPar object.
 
@@ -49,7 +49,7 @@ def generate(par:dict) -> NetworkParams:  # JAXXED!
     T = np.fft.fft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space
     T = np.repeat(T,N**2).reshape(N**2,len(par['x_n']))        # each cell of the network at initialization has the same transfer function
     NetPar = NetworkParams(J,C,B,G,state,T,N)              # I don't specify the fitness argument so it stays as default (-1)
-    fitness, state = compute_fitness(NetPar,par,verb=True)                      # Compute the fitness value of the network (also updates the state)
+    fitness, state = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network (also updates the state)
     return NetworkParams(J,C,B,G,state,T,N,fitness)           # return the set of updated parameters
 
 def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,np.ndarray]:    # JAXXED!
@@ -115,14 +115,14 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> tuple[float,np.nd
 
 ############# GENETIC ALGORITHM #################
 def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,NetworkParams]:
-    """Function to generate 2 offsprings from 2 parents by crossover ricombination.
+    """Function to generate 2 offsprings_list from 2 parents by crossover ricombination.
 
     Args:
         par1 (NetworkParams): parent network #1.
         par2 (NetworkParams): parent network #2.
 
     Returns:
-        tuple[NetworkParams,NetworkParams]: pair of offsprings.
+        tuple[NetworkParams,NetworkParams]: pair of offsprings_list.
     """   
     # Implements the crossover ricombination given 2 parent NetworkParams
     # and returns 2 offspring NetworksParams.
@@ -208,20 +208,21 @@ def mutation(n:NetworkParams,par:dict) -> NetworkParams:
     fitness_m, state_m = compute_fitness(NetPar,par)
     return NetworkParams(J_m,C_m,B_m,G_m,state_m,T_m,n.N,fitness_m)
 
-def evolution(par:dict,verb:int=1,early_stop:bool=True) -> tuple[list,list]:
+def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
     Args:
         par (dict): simulation parameters.
         verb (int, optional): verbosity. Defaults to 1.
         early_stop (bool, optional): early stopping condition. Defaults to True.
+        gen_verb (bool,optional): verbosity on the generate function. Default to False.
 
     Raises:
         ValueError: returns an error if par['N_sol'] is not even.
         ValueError: returns an error if the population is not conserved from one generation to the next.
 
     Returns:
-        tuple[list,list]: offsprings list and mean fitness values list.
+        tuple[list,list]: offsprings_list list and mean fitness values list.
     """
     if par['N_sol'] % 2 != 0:     # N_sol must be even
         print(f'Error:The number of solutions N_sol must be an even positive number.')
@@ -229,7 +230,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True) -> tuple[list,list]:
     solutions = []              # Generate the initial batch of solutions
     for n in range(par['N_sol']):
         # Generate a solution
-        sol = generate(par)     # already computes also the fitness value
+        sol = generate(par,verb=gen_verb)     # already computes also the fitness value
         solutions.append(sol)
     Fmean_values = []               # Initiate some container for statistic
     
@@ -247,45 +248,62 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True) -> tuple[list,list]:
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.fitness)    # sort in ascending order based on fitness
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
-        parents_idx = nrd.choice(np.arange(par['N_sol']),
-                                 size=(int(n_parents/2),2),replace=True,
-                                 p=np.array([1/sol.fitness for sol in solutions])
-                                 /np.sum(np.array([1/sol.fitness for sol in solutions])))
+        parents_idx = []
+        print(f'fitness: {[sol.fitness for sol in solutions]}')
+        fitness_inv = np.array([1/sol.fitness for sol in solutions]) 
+        print(f'Fitness_inv:{fitness_inv}')
+        prob = fitness_inv / np.sum(fitness_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the fitness
+        print(f'Prob:{prob}')
+        for _ in range(int(n_parents/2)):
+            pair = nrd.choice(np.arange(par['N_sol']), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
+            parents_idx.append(pair)
+        parents_idx = np.array(parents_idx)
         # REPRODUCTION
-        offsprings = []
+        offsprings_list = []
         for pair in range(len(parents_idx)):
-            offspring = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
-            offspring0 = mutation(offspring[0],par)     # mutate them
-            offsprings.append(offspring0)          # add them to the new population
-            offspring1 = mutation(offspring[1],par)
-            offsprings.append(offspring1)          # add them to the new population
+            children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
+            offspring0 = mutation(children[0],par)     # mutate them
+            offsprings_list.append(offspring0)          # add them to the new population
+            offspring1 = mutation(children[1],par)
+            offsprings_list.append(offspring1)          # add them to the new population
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
-            print(f'# of childs: {len(offspring)}')
+            print(f'Mean fitness: {mean_fit}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
-            print(f'# of childs: {len(offspring)}')
+            print(f'Mean fitness: {mean_fit}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
-            print(f'# of childs: {len(offspring)}')
+            print(f'Mean fitness: {mean_fit}')
         # RANDOM GENERATION
         for _ in range(par['N_sol']-n_parents):
             sol = generate(par)
-            offsprings.append(sol)
-        if len(offsprings) != par['N_sol']:      # check population conservation
-            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings)}, expected {par['N_sol']}')
+            offsprings_list.append(sol)
+        random.shuffle(offsprings_list)     # shuffle the new population for good measure
+        solutions = offsprings_list         # set the offsprings as the new population
+        if len(offsprings_list) != par['N_sol']:      # check population conservation
+            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
             raise ValueError
-        random.shuffle(offsprings)     # shuffle the new population for good measure
         Fmean_values.append(mean_fit)   # statistics
-    return offsprings, Fmean_values
+    return offsprings_list, Fmean_values
         
 ########## UTILITY FUNCTIONS #################
 def plot_T(T:np.ndarray,par:dict) -> None:
+    """Function to plot the shape of the transfer function given the Fourier coefficients.
+
+    Args:
+        T (np.ndarray): array of the Fourier coefficients of A SINGLE cell.
+        par (dict): simulation parameters.
+    """
     f_n = np.fft.ifft(T)
     coeff = np.polyfit(par['x_n'],f_n,2)    # fit the series of function value with a polynomial of degree up to 5
     new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
-    x = np.arange(min(par['x_n']),max(par['x_n']),1000)
+    x = np.linspace(min(par['x_n']),max(par['x_n']),1000)
     plt.plot(x,new_fun(x))
+    plt.grid()
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.title('Transfer function')
     plt.show()
         
         
