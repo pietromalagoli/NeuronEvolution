@@ -46,8 +46,13 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     state = np.abs(nrd.normal(size=(N**2,)))        # Randomly assign a state value to each cell distributed as the absolute value of a normal around 0
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
-    T = np.fft.fft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space
-    T = np.repeat(T,N**2).reshape(N**2,len(par['x_n']))        # each cell of the network at initialization has the same transfer function
+    print(f'f_n shape:{f_n.shape}')
+    print(f'f_n:{f_n}')
+    T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space
+    print(f'T shape: {T.shape}')
+    T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
+    print(f'T_complete shape:{T.shape}')
+    print(f'T_complete:{T}')
     NetPar = NetworkParams(J,C,B,G,state,T,N)              # I don't specify the fitness argument so it stays as default (-1)
     fitness, state = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network (also updates the state)
     return NetworkParams(J,C,B,G,state,T,N,fitness)           # return the set of updated parameters
@@ -103,7 +108,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> tuple[float,np.nd
     # Precompute the contributions for each cell to optimize the loop (this is incredibly faster)
     contributions = np.dot(NetPar.C * NetPar.J, state) + np.sum(NetPar.B, axis=1)      # weight x value + bias - contributions così ha shape = state.shape
     # Retrive the T function of each cell by doing ifft and then fit/interpolation
-    f_n = np.fft.ifft(NetPar.T,axis=1)      # inverse FT for moving back to coordinates space
+    f_n = np.fft.irfft(NetPar.T,axis=1)      # inverse FT for moving back to coordinates space
     for cell in range(f_n.shape[0]):
         coeff = np.polyfit(par['x_n'],f_n[cell,:],2)    # fit the series of function value with a polynomial of degree up to 2
         new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
@@ -148,8 +153,8 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     B2 *= C2
     # Now T crossover
     cut_idx = nrd.choice(np.arange(par1.T.shape[1]),par1.T.shape[0])  # randomly pick where to cut each cell's T coefficients string
-    T1 = np.zeros((par1.T.shape))
-    T2 = np.zeros((par1.T.shape))
+    T1 = np.zeros((par1.T.shape),dtype=np.complex128)           # 
+    T2 = np.zeros((par1.T.shape),dtype=np.complex128)
     for cell in range(par1.T.shape[0]):      # I have to use this loop because append only works with one dimensional arrays
         T1[cell,:] = np.append(par1.T[cell,:cut_idx[cell]],par2.T[cell,cut_idx[cell]:])
         T2[cell,:] = np.append(par2.T[cell,:cut_idx[cell]],par1.T[cell,cut_idx[cell]:])
@@ -295,7 +300,7 @@ def plot_T(T:np.ndarray,par:dict) -> None:
         T (np.ndarray): array of the Fourier coefficients of A SINGLE cell.
         par (dict): simulation parameters.
     """
-    f_n = np.fft.ifft(T)
+    f_n = np.fft.irfft(T)
     coeff = np.polyfit(par['x_n'],f_n,2)    # fit the series of function value with a polynomial of degree up to 5
     new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
     x = np.linspace(min(par['x_n']),max(par['x_n']),1000)
