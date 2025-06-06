@@ -46,13 +46,8 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     state = np.abs(nrd.normal(size=(N**2,)))        # Randomly assign a state value to each cell distributed as the absolute value of a normal around 0
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
-    print(f'f_n shape:{f_n.shape}')
-    print(f'f_n:{f_n}')
-    T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space
-    print(f'T shape: {T.shape}')
+    T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space (use the real version of fft, rfft; see NumPy docs)
     T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
-    print(f'T_complete shape:{T.shape}')
-    print(f'T_complete:{T}')
     NetPar = NetworkParams(J,C,B,G,state,T,N)              # I don't specify the fitness argument so it stays as default (-1)
     fitness, state = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network (also updates the state)
     return NetworkParams(J,C,B,G,state,T,N,fitness)           # return the set of updated parameters
@@ -72,7 +67,7 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[floa
     for i,input in enumerate(par['input_set']):
         output,state = ff(input,NetPar,par)
         if verb:
-            print(f'Input: {input} -> {output}')
+            print(f'Input: {input} -> Output: {output}')
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
         target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
         volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
@@ -86,7 +81,8 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[floa
             print(f'Volume cost:{volume_cost}')
             print(f'Length cost:{length_cost}')
             print(f'Path cost:{path_cost}')
-        fitness += np.exp(target_dist + volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
+        #fitness += np.exp(target_dist + volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
+        fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
     fitness /= len(par['input_set'])    
     return fitness, state
 
@@ -110,7 +106,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> tuple[float,np.nd
     # Retrive the T function of each cell by doing ifft and then fit/interpolation
     f_n = np.fft.irfft(NetPar.T,axis=1)      # inverse FT for moving back to coordinates space
     for cell in range(f_n.shape[0]):
-        coeff = np.polyfit(par['x_n'],f_n[cell,:],2)    # fit the series of function value with a polynomial of degree up to 2
+        coeff = np.polyfit(par['x_n'],f_n[cell,:],3)    # fit the series of function value with a polynomial of degree up to 2
         new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
         state[cell] = new_fun(contributions[cell])    # apply the new functional as the T function for the associated cell
     if verb > 0: 
@@ -153,8 +149,8 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     B2 *= C2
     # Now T crossover
     cut_idx = nrd.choice(np.arange(par1.T.shape[1]),par1.T.shape[0])  # randomly pick where to cut each cell's T coefficients string
-    T1 = np.zeros((par1.T.shape),dtype=np.complex128)           # 
-    T2 = np.zeros((par1.T.shape),dtype=np.complex128)
+    T1 = np.zeros((par1.T.shape),dtype=np.complex128)           # I have to specify the type because otherwise when casting it as a complex value from par.T 
+    T2 = np.zeros((par1.T.shape),dtype=np.complex128)           # it discards the imaginary part
     for cell in range(par1.T.shape[0]):      # I have to use this loop because append only works with one dimensional arrays
         T1[cell,:] = np.append(par1.T[cell,:cut_idx[cell]],par2.T[cell,cut_idx[cell]:])
         T2[cell,:] = np.append(par2.T[cell,:cut_idx[cell]],par1.T[cell,cut_idx[cell]:])
@@ -172,12 +168,13 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     #return [NetworkParams(J1,C1,B1,G1,state1,T1,par1.N,fitness1), NetworkParams(J2,C2,B2,G2,state2,T2,par1.N,fitness2)]
     return (NetworkParams(J1,C1,B1,G1,state1,T1,par1.N), NetworkParams(J2,C2,B2,G2,state2,T2,par1.N))
     
-def mutation(n:NetworkParams,par:dict) -> NetworkParams:
+def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     """Function to mutate a given network.
 
     Args:
         n (NetworkParams): parameters of the network to mutate.
         par (dict): simulation parameters.
+        gen_verb (bool,optional): verbosity on the compute_fitness function.
 
     Returns:
         NetworkParams: mutated parameters of the network
@@ -210,7 +207,7 @@ def mutation(n:NetworkParams,par:dict) -> NetworkParams:
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
     NetPar = NetworkParams(J_m,C_m,B_m,G_m,n.state,T_m,n.N)
-    fitness_m, state_m = compute_fitness(NetPar,par)
+    fitness_m, state_m = compute_fitness(NetPar,par,verb=gen_verb)
     return NetworkParams(J_m,C_m,B_m,G_m,state_m,T_m,n.N,fitness_m)
 
 def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
@@ -254,11 +251,8 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         solutions = sorted(solutions, key=lambda sol: sol.fitness)    # sort in ascending order based on fitness
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = []
-        print(f'fitness: {[sol.fitness for sol in solutions]}')
         fitness_inv = np.array([1/sol.fitness for sol in solutions]) 
-        print(f'Fitness_inv:{fitness_inv}')
         prob = fitness_inv / np.sum(fitness_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the fitness
-        print(f'Prob:{prob}')
         for _ in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(par['N_sol']), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx.append(pair)
@@ -267,9 +261,9 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         offsprings_list = []
         for pair in range(len(parents_idx)):
             children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
-            offspring0 = mutation(children[0],par)     # mutate them
+            offspring0 = mutation(children[0],par,gen_verb=gen_verb)     # mutate them (here also the fitness is computed, see mutation function definition)
             offsprings_list.append(offspring0)          # add them to the new population
-            offspring1 = mutation(children[1],par)
+            offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
@@ -301,7 +295,7 @@ def plot_T(T:np.ndarray,par:dict) -> None:
         par (dict): simulation parameters.
     """
     f_n = np.fft.irfft(T)
-    coeff = np.polyfit(par['x_n'],f_n,2)    # fit the series of function value with a polynomial of degree up to 5
+    coeff = np.polyfit(par['x_n'],f_n,3)    # fit the series of function value with a polynomial of degree up to 5
     new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
     x = np.linspace(min(par['x_n']),max(par['x_n']),1000)
     plt.plot(x,new_fun(x))
