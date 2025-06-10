@@ -15,7 +15,6 @@ class NetworkParams(NamedTuple):
     C: np.ndarray          # connectivity matrix
     B: np.ndarray          # bias matrix
     G: Graph                # Graph of the network (Graph_tool)
-    state: np.ndarray      # values of the cells in the network
     T: np.ndarray   # array of the T functions of the single cells in the network
     N: int = 0              # side lenght of the squared lattice (number of cells = N**2)
     fitness: float = -1.     # fitness value of the network
@@ -26,7 +25,7 @@ class NetworkParams(NamedTuple):
 # - COMPUTE_FITNESS(PAR,NETPAR): CALCOLA LA FITNESS DEL NETWORK ATTRAVERSO IL METODO FF() E
 #   RITORNA TALE FITNESS.
 # - FF(INPUT(S),NETPAR): FA IL 'FEED-FORWARD' DEL NETWORK DATO UN SET DI INPUT E RITORNA 
-#   LO STATE (OSSIA L'ARRAY DEGLI STATI 0 O 1 DELLE SINGOLE CELL)
+#   L'OUTPUT 
     
 def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     """Generate a random network given the parameters par by updating the 
@@ -44,15 +43,14 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     J = nrd.uniform(size=(N**2,N**2)) * C                # uniformly populate the weights in the weight matrix J                                       
     B = nrd.normal(size=(N**2,N**2)) * C                 # extract from a normal distribution centered in 0 with st. dv. = 1 the biases (spero vada bene fatto così)
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
-    state = np.abs(nrd.normal(size=(N**2,)))        # Randomly assign a state value to each cell distributed as the absolute value of a normal around 0
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
     T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space (use the real version of fft, rfft; see NumPy docs)
     T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
-    NetPar = NetworkParams(J,C,B,G,state,T,N)              # I don't specify the fitness argument so it stays as default (-1)
-    fitness, state = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network (also updates the state)
-    return NetworkParams(J,C,B,G,state,T,N,fitness)           # return the set of updated parameters
+    NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
+    fitness = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
+    return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
 
-def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,np.ndarray]:    # JAXXED!
+def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
     """Function for computing the fitness of a given network.
 
     Args:
@@ -61,11 +59,11 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[floa
         verb (bool, optional): verbosity. Defaults to False.
 
     Returns:
-        tuple[float,np.ndarray]: computed fitness and updated states of the nodes of the network. 
+        float: computed fitness of the network. 
     """
     fitness = 0.                # I need this check, bc otherwise I risk adding fitness over fitness  
     for i,input in enumerate(par['input_set']):
-        output,state = ff(input,NetPar,par)
+        output = ff(input,NetPar,par)
         if verb:
             print(f'Input: {input} -> Output: {output}')
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
@@ -84,9 +82,9 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[floa
         #fitness += np.exp(target_dist + volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
         fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
     fitness /= len(par['input_set'])    
-    return fitness, state
+    return fitness
 
-def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> tuple[float,np.ndarray]:     # JAXXED!
+def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
 
     Args:
@@ -96,23 +94,25 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> tuple[float,np.nd
         verb (int, optional): verbosity. Defaults to 0.
 
     Returns:
-        tuple[float,np.ndarray]: output of the 'feed-forward' and updated states of each node of the network.
+        float: output of the 'feed-forward'.
     """
-    state = NetPar.state                                # set the value of the two inputs cells through the input value
+    state = np.abs(nrd.normal(loc=0.5,size=(NetPar.N**2,)))        # Randomly assign a state value to each cell distributed as the absolute value of a normal around 0.5
     state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
     state[(NetPar.N - 1) * NetPar.N-1] = input[1]    # cell in the lower left corner of the 2D lattice
     # Precompute the contributions for each cell to optimize the loop (this is incredibly faster)
     contributions = np.dot(NetPar.C * NetPar.J, state) + np.sum(NetPar.B, axis=1)      # weight x value + bias - contributions così ha shape = state.shape
     # Retrive the T function of each cell by doing ifft and then fit/interpolation
     f_n = np.fft.irfft(NetPar.T,axis=1)      # inverse FT for moving back to coordinates space
-    for cell in range(f_n.shape[0]):
+    for cell in range(1,f_n.shape[0]):                  # from 1 (included) so to skip the update of the 1st input cell
+        if cell == (NetPar.N - 1) * NetPar.N-1:
+            continue                                    # skip the update of the 2nd input cell
         coeff = np.polyfit(par['x_n'],f_n[cell,:],3)    # fit the series of function value with a polynomial of degree up to 2
         new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
         state[cell] = new_fun(contributions[cell])    # apply the new functional as the T function for the associated cell
     if verb > 0: 
         print(f'State of each cell: {state}')
     output = state[-1]                          # the cell in the right lower corner is the output
-    return output, state
+    return output
 
 ############# GENETIC ALGORITHM #################
 def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,NetworkParams]:
@@ -155,18 +155,16 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
         T1[cell,:] = np.append(par1.T[cell,:cut_idx[cell]],par2.T[cell,cut_idx[cell]:])
         T2[cell,:] = np.append(par2.T[cell,:cut_idx[cell]],par1.T[cell,cut_idx[cell]:])
     # Now I set the other elements of NetPar that are not affected by the crossover
-    state1 = np.abs(nrd.normal(size=par1.state.shape))     # State distributed as in the initialization because, biologically,
-    state2 = np.abs(nrd.normal(size=par1.state.shape))     # it makes sense that the children do not inherit the value of the neurons of the parents
     G1 = Graph(np.column_stack(np.nonzero(C1)))                       # Generate the Graph given the connectivity matrix
     G2 = Graph(np.column_stack(np.nonzero(C2)))      
     # LE PROSSIME RIGHE SONO COMMENTATE PERCHé PER ORA NON MI SERVE CHE QUESTA FUNZIONE CALCOLI ANCHE LA FITNESS, PERCHé
     # LO FA LA FUNZIONE MUTATION, CHE PER ORA VIENE SEMPRE ESEGUITA UNA VOLTA CHE VIENE ESEGUITA QUESTA                 
-    #NetPar1 = NetworkParams(J1,C1,B1,G1,state1,T1,par1.N)
-    #NetPar2 = NetworkParams(J2,C2,B2,G2,state2,T2,par1.N)
-    #fitness1, state1 = compute_fitness(par,NetPar1)
-    #fitness2, state2 = compute_fitness(par,NetPar2)
-    #return [NetworkParams(J1,C1,B1,G1,state1,T1,par1.N,fitness1), NetworkParams(J2,C2,B2,G2,state2,T2,par1.N,fitness2)]
-    return (NetworkParams(J1,C1,B1,G1,state1,T1,par1.N), NetworkParams(J2,C2,B2,G2,state2,T2,par1.N))
+    #NetPar1 = NetworkParams(J1,C1,B1,G1,T1,par1.N)
+    #NetPar2 = NetworkParams(J2,C2,B2,G2,T2,par1.N)
+    #fitness1 = compute_fitness(par,NetPar1)
+    #fitness2 = compute_fitness(par,NetPar2)
+    #return [NetworkParams(J1,C1,B1,G1,T1,par1.N,fitness1), NetworkParams(J2,C2,B2,G2,T2,par1.N,fitness2)]
+    return (NetworkParams(J1,C1,B1,G1,T1,par1.N), NetworkParams(J2,C2,B2,G2,T2,par1.N))
     
 def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     """Function to mutate a given network.
@@ -206,9 +204,9 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
                                                                             # bc JAX only gives the unit normal)
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
-    NetPar = NetworkParams(J_m,C_m,B_m,G_m,n.state,T_m,n.N)
-    fitness_m, state_m = compute_fitness(NetPar,par,verb=gen_verb)
-    return NetworkParams(J_m,C_m,B_m,G_m,state_m,T_m,n.N,fitness_m)
+    NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
+    fitness_m = compute_fitness(NetPar,par,verb=gen_verb)
+    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
 
 def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
