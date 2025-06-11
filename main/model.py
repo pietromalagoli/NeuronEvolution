@@ -46,9 +46,10 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
     T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space (use the real version of fft, rfft; see NumPy docs)
     T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
-    NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
-    fitness = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
-    return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
+    #NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
+    #fitness = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
+    #return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
+    return NetworkParams(J,C,B,G,T,N)           # return the set of updated parameters
 
 def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
     """Function for computing the fitness of a given network.
@@ -61,28 +62,37 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
     Returns:
         float: computed fitness of the network. 
     """
-    fitness = 0.                # I need this check, bc otherwise I risk adding fitness over fitness  
+    fitness = 0.                # I need this check, bc otherwise I risk adding fitness over fitness 
+    target_dists = 0.
+    volumes = 0. 
     for i,input in enumerate(par['input_set']):
         output = ff(input,NetPar,par)
         if verb:
             print(f'Input: {input} -> Output: {output}')
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
-        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
+        #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
+        target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
+        #volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
+        '''
         dist = shortest_distance(NetPar.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
         dist = np.where(dist >= 2147483647, 0, dist)                               # set each value that overflows (bc no path exists) to 0
-        length_cost = (np.sum((NetPar.C.reshape(-1) * dist.reshape(-1))
-                                **par['length_powerlaw'])/norm_factor)**2            # average wiring length cost
+        length_cost = (np.sum((NetPar.C.reshape(-1) * dist.reshape(-1)))/norm_factor)**2            # average wiring length cost
         path_cost = (np.sum(dist,axis=(0,1))/norm_factor)**2                       # average shortest path length cost
+        '''
         if verb:
-            print(f'Target distance:{target_dist}')
-            print(f'Volume cost:{volume_cost}')
-            print(f'Length cost:{length_cost}')
-            print(f'Path cost:{path_cost}')
-        #fitness += np.exp(target_dist + volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
-        fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
-    fitness /= len(par['input_set'])    
-    return fitness
+            print(f'Target distance:{(target_dist)**2}')
+            print(f'Volume cost:{(volume_cost)**2}')
+#            print(f'Length cost:{(length_cost)**2}')
+#           print(f'Path cost:{(path_cost)**2}')
+        #fitness += np.exp(5*target_dist + 4*volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
+        #fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
+        #fitness += target_dist + volume_cost  # take the exponential of the sum of the costs (weighted if needed)
+        target_dists += target_dist
+        volumes += volume_cost
+    #fitness /= len(par['input_set'])    
+    #return fitness
+    return target_dists, volumes
 
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
@@ -204,9 +214,10 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
                                                                             # bc JAX only gives the unit normal)
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
-    NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
-    fitness_m = compute_fitness(NetPar,par,verb=gen_verb)
-    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
+    #NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
+    #fitness_m = compute_fitness(NetPar,par,verb=gen_verb)
+    #return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
+    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
 
 def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
@@ -228,18 +239,28 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         print(f'Error:The number of solutions N_sol must be an even positive number.')
         raise ValueError
     solutions = []              # Generate the initial batch of solutions
-    for n in range(par['N_sol']):
+    t_dists = []                # Container for target distance for each solution
+    volumes = []                # Container for volume costs for each solution
+    for _ in range(par['N_sol']):
         # Generate a solution
         sol = generate(par,verb=gen_verb)     # already computes also the fitness value
         solutions.append(sol)
+        t_dist, volume = compute_fitness(sol,par)
+        t_dists.append(t_dist)
+        volumes.append(volume)
+    mean_t_dist = np.mean(t_dists)
+    mean_volume = np.mean(volumes)
+    for n,sol in enumerate(solutions):
+        fitness = ((t_dists[n]/mean_t_dist) + (volumes[n]/mean_volume)) / len(par['input_set'])
+        solutions[n] = NetworkParams(sol.J,sol.C,sol.B,sol.G,sol.T,sol.N,fitness)
     Fmean_values = []               # Initiate some container for statistic
+    mean_t_dist_values = []         # Container for mean target distance
+    mean_volume_values = []         # Container for mean volume cost
     
     ##  EVOLUTION
     for iter in range(par['n_iter']):
-        # Compute the mean fitness for statistics
-        mean_fit = np.sum(np.array([sol.fitness for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
-        # Save the old solution set for possible early stopping (QUESTO DOVREBBE TRIGGERARE SOLO SE SIAMO IN EARLY STOPPING IN QUESTA ITERAZIONE)
         '''
+        # Save the old solution set for possible early stopping (QUESTO DOVREBBE TRIGGERARE SOLO SE SIAMO IN EARLY STOPPING IN QUESTA ITERAZIONE)
         if early_stop:
             solutions_old = []
             for sol in solutions:
@@ -249,10 +270,10 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         solutions = sorted(solutions, key=lambda sol: sol.fitness)    # sort in ascending order based on fitness
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = []
-        fitness_inv = np.array([1/sol.fitness for sol in solutions]) 
+        fitness_inv = np.array([1/(sol.fitness**2) for sol in solutions]) 
         prob = fitness_inv / np.sum(fitness_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the fitness
         for _ in range(int(n_parents/2)):
-            pair = nrd.choice(np.arange(par['N_sol']), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
+            pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx.append(pair)
         parents_idx = np.array(parents_idx)
         # REPRODUCTION
@@ -263,15 +284,6 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
-        if iter%100 == 0 and verb == 1:
-            print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
-        elif iter%10 == 0 and verb == 2:
-            print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
-        elif verb == 3: 
-            print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
         # RANDOM GENERATION
         for _ in range(par['N_sol']-n_parents):
             sol = generate(par)
@@ -281,8 +293,41 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if len(offsprings_list) != par['N_sol']:      # check population conservation
             print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
             raise ValueError
+        # Compute the fitness
+        t_dists = []                # Container for target distance for each solution
+        volumes = []                # Container for volume costs for each solution
+        for sol in solutions: 
+            t_dist, volume = compute_fitness(sol,par)
+            t_dists.append(t_dist)
+            volumes.append(volume)
+        mean_t_dist = np.mean(t_dists)
+        mean_volume = np.mean(volumes)
+        for n,sol in enumerate(solutions):
+            fitness = ((t_dists[n]/mean_t_dist) + (volumes[n]/mean_volume)) / len(par['input_set'])
+            solutions[n] = NetworkParams(sol.J,sol.C,sol.B,sol.G,sol.T,sol.N,fitness)
+        mean_t_dist_values.append(mean_t_dist)
+        mean_volume_values.append(mean_volume)
+        mean_fit = np.sum(np.array([sol.fitness for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
         Fmean_values.append(mean_fit)   # statistics
-    return offsprings_list, Fmean_values
+        if iter%100 == 0 and verb == 1:
+            print(f'Iteration #{iter}...')
+            print(f'Mean fitness: {mean_fit}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse fitnesses: {fitness_inv}')
+        elif iter%10 == 0 and verb == 2:
+            print(f'Iteration #{iter}...')
+            print(f'Mean fitness: {mean_fit}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse fitnesses: {fitness_inv}')
+        elif verb == 3: 
+            print(f'Iteration #{iter}...')
+            print(f'Mean fitness: {mean_fit}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse fitnesses: {fitness_inv}')
+    return offsprings_list, Fmean_values, mean_t_dist_values, mean_volume_values
         
 ########## UTILITY FUNCTIONS #################
 def plot_T(T:np.ndarray,par:dict) -> None:
@@ -296,6 +341,7 @@ def plot_T(T:np.ndarray,par:dict) -> None:
     coeff = np.polyfit(par['x_n'],f_n,3)    # fit the series of function value with a polynomial of degree up to 5
     new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
     x = np.linspace(min(par['x_n']),max(par['x_n']),1000)
+    x = np.linspace(-10,10,1000)
     plt.plot(x,new_fun(x))
     plt.grid()
     plt.xlabel('x')
