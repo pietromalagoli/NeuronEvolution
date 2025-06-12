@@ -71,7 +71,7 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
         #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
         #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
-        #add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
+        add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
         target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
         volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         '''
@@ -89,7 +89,7 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
         #fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
         target_dists += target_dist
         volumes += volume_cost
-        fitness += target_dist + volume_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
+        fitness += target_dist + volume_cost + add_target_dist # take the exponential of the sum of the costs (weighted if needed)
     fitness /= len(par['input_set'])    
     return fitness, target_dists, volumes
     
