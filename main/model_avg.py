@@ -46,10 +46,11 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
     T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space (use the real version of fft, rfft; see NumPy docs)
     T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
-    NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
-    fitness,_,_ = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
-    return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
-    
+    #NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
+    #fitness = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
+    #return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
+    return NetworkParams(J,C,B,G,T,N)           # return the set of updated parameters
+
 def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
     """Function for computing the fitness of a given network.
 
@@ -63,7 +64,7 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
     """
     fitness = 0.                # I need this check, bc otherwise I risk adding fitness over fitness 
     target_dists = 0.
-    volumes = 0.
+    volumes = 0. 
     for i,input in enumerate(par['input_set']):
         output = ff(input,NetPar,par)
         if verb:
@@ -71,8 +72,8 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
         #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
         #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
-        #add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
-        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
+        target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
+        #volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         '''
         dist = shortest_distance(NetPar.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
@@ -87,12 +88,13 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
 #           print(f'Path cost:{(path_cost)**2}')
         #fitness += np.exp(5*target_dist + 4*volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
         #fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
+        #fitness += target_dist + volume_cost  # take the exponential of the sum of the costs (weighted if needed)
         target_dists += target_dist
         volumes += volume_cost
-        fitness += target_dist + volume_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
-    fitness /= len(par['input_set'])    
-    return fitness, target_dists, volumes
-    
+    #fitness /= len(par['input_set'])    
+    #return fitness
+    return target_dists, volumes
+
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
 
@@ -213,10 +215,11 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
                                                                             # bc JAX only gives the unit normal)
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
-    NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
-    fitness_m,_,_ = compute_fitness(NetPar,par,verb=gen_verb)
-    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
-    
+    #NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
+    #fitness_m = compute_fitness(NetPar,par,verb=gen_verb)
+    #return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
+    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
+
 def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
@@ -243,11 +246,14 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         # Generate a solution
         sol = generate(par,verb=gen_verb)     # already computes also the fitness value
         solutions.append(sol)
-        _,t_dist, volume = compute_fitness(sol,par)
+        t_dist, volume = compute_fitness(sol,par)
         t_dists.append(t_dist)
         volumes.append(volume)
     mean_t_dist = np.mean(t_dists)
     mean_volume = np.mean(volumes)
+    for n,sol in enumerate(solutions):
+        fitness = ((t_dists[n]/mean_t_dist) + (volumes[n]/mean_volume)) / len(par['input_set'])
+        solutions[n] = NetworkParams(sol.J,sol.C,sol.B,sol.G,sol.T,sol.N,fitness)
     Fmean_values = []               # Initiate some container for statistic
     mean_t_dist_values = []         # Container for mean target distance
     mean_volume_values = []         # Container for mean volume cost
@@ -296,11 +302,14 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         t_dists = []                # Container for target distance for each solution
         volumes = []                # Container for volume costs for each solution
         for sol in solutions: 
-            _,t_dist, volume = compute_fitness(sol,par)
+            t_dist, volume = compute_fitness(sol,par)
             t_dists.append(t_dist)
             volumes.append(volume)
         mean_t_dist = np.mean(t_dists)
         mean_volume = np.mean(volumes)
+        for n,sol in enumerate(solutions):
+            fitness = ((t_dists[n]/mean_t_dist) + (volumes[n]/mean_volume)) / len(par['input_set'])
+            solutions[n] = NetworkParams(sol.J,sol.C,sol.B,sol.G,sol.T,sol.N,fitness)
         mean_t_dist_values.append(mean_t_dist)
         mean_volume_values.append(mean_volume)
         mean_fit = np.sum(np.array([sol.fitness for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
