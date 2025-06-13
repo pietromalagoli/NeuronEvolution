@@ -17,18 +17,18 @@ class NetworkParams(NamedTuple):
     G: Graph                # Graph of the network (Graph_tool)
     T: np.ndarray   # array of the T functions of the single cells in the network
     N: int = 0              # side lenght of the squared lattice (number of cells = N**2)
-    fitness: float = -1.     # fitness value of the network
+    loss: float = -1.     # loss value of the network
     
 # ORA DEFINISCO LE VARIE FUNZIONI PER OPERARE SUI NETWORK
 # - GENERATE(PAR,NETPAR): CREA (IN REALTà NON CREA L'OGGETTO) UN NETWORK RANDOM DATI I PARAMETRI 
 #   PAR E RITORNA I PARAMETRI DEL NETWORK (NETPAR) AGGIORNATI
-# - COMPUTE_FITNESS(PAR,NETPAR): CALCOLA LA FITNESS DEL NETWORK ATTRAVERSO IL METODO FF() E
-#   RITORNA TALE FITNESS.
+# - COMPUTE_loss(PAR,NETPAR): CALCOLA LA loss DEL NETWORK ATTRAVERSO IL METODO FF() E
+#   RITORNA TALE loss.
 # - FF(INPUT(S),NETPAR): FA IL 'FEED-FORWARD' DEL NETWORK DATO UN SET DI INPUT E RITORNA 
 #   L'OUTPUT 
     
 def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
-    """Generate a random network given the parameters par by updating the 
+    """Generate a random network given the parameters par by returning a 
         NetPar object.
 
     Args:
@@ -40,18 +40,18 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     N = par['N']  
     C = np.ones((N**2,N**2))                        # as first, initialize C as fully connected (all ones)
     C = C - np.eye(N**2)                                # no self links                                    
-    J = nrd.uniform(size=(N**2,N**2)) * C                # uniformly populate the weights in the weight matrix J                                       
+    J = nrd.uniform(low=par['J_range'][0],high=par['J_range'][1],size=(N**2,N**2)) * C                # uniformly populate the weights in the weight matrix J                                       
     B = nrd.normal(size=(N**2,N**2)) * C                 # extract from a normal distribution centered in 0 with st. dv. = 1 the biases (spero vada bene fatto così)
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     f_n = par['T_initial'](par['x_n'])                  # evaluate the initial transfer function on x_n
     T = np.fft.rfft(f_n)                                # compute the Fourier coefficients of f_n to move to the frequency space (use the real version of fft, rfft; see NumPy docs)
     T = np.tile(T,N**2).reshape(N**2,len(T))        # each cell of the network at initialization has the same transfer function
-    NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the fitness argument so it stays as default (-1)
-    fitness,_,_ = compute_fitness(NetPar,par,verb=verb)                      # Compute the fitness value of the network 
-    return NetworkParams(J,C,B,G,T,N,fitness)           # return the set of updated parameters
+    NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the loss argument so it stays as default (-1)
+    loss,_,_ = compute_loss(NetPar,par,verb=verb)                      # Compute the loss value of the network 
+    return NetworkParams(J,C,B,G,T,N,loss)           # return the set of updated parameters
     
-def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
-    """Function for computing the fitness of a given network.
+def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
+    """Function for computing the loss of a given network.
 
     Args:
         NetPar (NetworkParams): parameter of the network in question.
@@ -59,9 +59,9 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
         verb (bool, optional): verbosity. Defaults to False.
 
     Returns:
-        float: computed fitness of the network. 
+        float: computed loss of the network. 
     """
-    fitness = 0.                # I need this check, bc otherwise I risk adding fitness over fitness 
+    loss = 0.                # I need this check, bc otherwise I risk adding loss over loss 
     target_dists = 0.
     volumes = 0.
     for i,input in enumerate(par['input_set']):
@@ -85,13 +85,13 @@ def compute_fitness(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    
             print(f'Volume cost:{(volume_cost)**2}')
 #            print(f'Length cost:{(length_cost)**2}')
 #           print(f'Path cost:{(path_cost)**2}')
-        #fitness += np.exp(5*target_dist + 4*volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
-        #fitness += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
+        #loss += np.exp(5*target_dist + 4*volume_cost + length_cost + path_cost) # take the exponential of the sum of the costs (weighted if needed)
+        #loss += target_dist + volume_cost + length_cost + path_cost # take the exponential of the sum of the costs (weighted if needed)
         target_dists += target_dist
         volumes += volume_cost
-        fitness += target_dist + volume_cost + add_target_dist # take the exponential of the sum of the costs (weighted if needed)
-    fitness /= len(par['input_set'])    
-    return fitness, target_dists, volumes
+        loss += target_dist + volume_cost + add_target_dist # take the exponential of the sum of the costs (weighted if needed)
+    loss /= len(par['input_set'])    
+    return loss, target_dists, volumes
     
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
@@ -105,7 +105,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
     Returns:
         float: output of the 'feed-forward'.
     """
-    state = np.abs(nrd.normal(loc=0.5,size=(NetPar.N**2,)))        # Randomly assign a state value to each cell distributed as the absolute value of a normal around 0.5
+    state = nrd.normal(loc=0.5,size=(NetPar.N**2,))        # Randomly assign a state value to each cell distributed as a normal around 0.5
     state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
     state[(NetPar.N - 1) * NetPar.N-1] = input[1]    # cell in the lower left corner of the 2D lattice
     # Precompute the contributions for each cell to optimize the loop (this is incredibly faster)
@@ -166,13 +166,13 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     # Now I set the other elements of NetPar that are not affected by the crossover
     G1 = Graph(np.column_stack(np.nonzero(C1)))                       # Generate the Graph given the connectivity matrix
     G2 = Graph(np.column_stack(np.nonzero(C2)))      
-    # LE PROSSIME RIGHE SONO COMMENTATE PERCHé PER ORA NON MI SERVE CHE QUESTA FUNZIONE CALCOLI ANCHE LA FITNESS, PERCHé
+    # LE PROSSIME RIGHE SONO COMMENTATE PERCHé PER ORA NON MI SERVE CHE QUESTA FUNZIONE CALCOLI ANCHE LA loss, PERCHé
     # LO FA LA FUNZIONE MUTATION, CHE PER ORA VIENE SEMPRE ESEGUITA UNA VOLTA CHE VIENE ESEGUITA QUESTA                 
     #NetPar1 = NetworkParams(J1,C1,B1,G1,T1,par1.N)
     #NetPar2 = NetworkParams(J2,C2,B2,G2,T2,par1.N)
-    #fitness1 = compute_fitness(par,NetPar1)
-    #fitness2 = compute_fitness(par,NetPar2)
-    #return [NetworkParams(J1,C1,B1,G1,T1,par1.N,fitness1), NetworkParams(J2,C2,B2,G2,T2,par1.N,fitness2)]
+    #loss1 = compute_loss(par,NetPar1)
+    #loss2 = compute_loss(par,NetPar2)
+    #return [NetworkParams(J1,C1,B1,G1,T1,par1.N,loss1), NetworkParams(J2,C2,B2,G2,T2,par1.N,loss2)]
     return (NetworkParams(J1,C1,B1,G1,T1,par1.N), NetworkParams(J2,C2,B2,G2,T2,par1.N))
     
 def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
@@ -181,7 +181,7 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     Args:
         n (NetworkParams): parameters of the network to mutate.
         par (dict): simulation parameters.
-        gen_verb (bool,optional): verbosity on the compute_fitness function.
+        gen_verb (bool,optional): verbosity on the compute_loss function.
 
     Returns:
         NetworkParams: mutated parameters of the network
@@ -214,8 +214,8 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
     NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
-    fitness_m,_,_ = compute_fitness(NetPar,par,verb=gen_verb)
-    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,fitness_m)
+    loss_m,_,_ = compute_loss(NetPar,par,verb=gen_verb)
+    return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,loss_m)
     
 def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
@@ -231,7 +231,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         ValueError: returns an error if the population is not conserved from one generation to the next.
 
     Returns:
-        tuple[list,list]: offsprings_list list and mean fitness values list.
+        tuple[list,list]: offsprings_list list and mean loss values list.
     """
     if par['N_sol'] % 2 != 0:     # N_sol must be even
         print(f'Error:The number of solutions N_sol must be an even positive number.')
@@ -241,9 +241,9 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
     volumes = []                # Container for volume costs for each solution
     for _ in range(par['N_sol']):
         # Generate a solution
-        sol = generate(par,verb=gen_verb)     # already computes also the fitness value
+        sol = generate(par,verb=gen_verb)     # already computes also the loss value
         solutions.append(sol)
-        _,t_dist, volume = compute_fitness(sol,par)
+        _,t_dist, volume = compute_loss(sol,par)
         t_dists.append(t_dist)
         volumes.append(volume)
     mean_t_dist = np.mean(t_dists)
@@ -253,7 +253,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
     mean_volume_values = []         # Container for mean volume cost
     mean_t_dist_values.append(mean_t_dist)
     mean_volume_values.append(mean_volume)
-    mean_fit = np.sum(np.array([sol.fitness for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
+    mean_fit = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_loss method
     Fmean_values.append(mean_fit)   # statistics
     
     ##  EVOLUTION
@@ -266,11 +266,11 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
                 solutions_old.append(copy.deepcopy(sol))
         '''
         # SELECTION
-        solutions = sorted(solutions, key=lambda sol: sol.fitness)    # sort in ascending order based on fitness
+        solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = []
-        fitness_inv = np.array([1/(sol.fitness**2) for sol in solutions]) 
-        prob = fitness_inv / np.sum(fitness_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the fitness
+        loss_inv = np.array([1/(sol.loss**2) for sol in solutions]) 
+        prob = loss_inv / np.sum(loss_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the loss
         for _ in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx.append(pair)
@@ -279,7 +279,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         offsprings_list = []
         for pair in range(len(parents_idx)):
             children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
-            offspring0 = mutation(children[0],par,gen_verb=gen_verb)     # mutate them (here also the fitness is computed, see mutation function definition)
+            offspring0 = mutation(children[0],par,gen_verb=gen_verb)     # mutate them (here also the loss is computed, see mutation function definition)
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
@@ -292,37 +292,37 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if len(offsprings_list) != par['N_sol']:      # check population conservation
             print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
             raise ValueError
-        # Compute the fitness
+        # Compute the loss
         t_dists = []                # Container for target distance for each solution
         volumes = []                # Container for volume costs for each solution
         for sol in solutions: 
-            _,t_dist, volume = compute_fitness(sol,par)
+            _,t_dist, volume = compute_loss(sol,par)
             t_dists.append(t_dist)
             volumes.append(volume)
         mean_t_dist = np.mean(t_dists)
         mean_volume = np.mean(volumes)
         mean_t_dist_values.append(mean_t_dist)
         mean_volume_values.append(mean_volume)
-        mean_fit = np.sum(np.array([sol.fitness for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
+        mean_fit = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_loss method
         Fmean_values.append(mean_fit)   # statistics
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
+            print(f'Mean loss: {mean_fit}')
             print(f'Parents indexes: {parents_idx}')
             print(f'Selection Probabilities: {prob}')
-            print(f'Inverse fitnesses: {fitness_inv}')
+            print(f'Inverse losses: {loss_inv}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
+            print(f'Mean loss: {mean_fit}')
             print(f'Parents indexes: {parents_idx}')
             print(f'Selection Probabilities: {prob}')
-            print(f'Inverse fitnesses: {fitness_inv}')
+            print(f'Inverse losses: {loss_inv}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
-            print(f'Mean fitness: {mean_fit}')
+            print(f'Mean loss: {mean_fit}')
             print(f'Parents indexes: {parents_idx}')
             print(f'Selection Probabilities: {prob}')
-            print(f'Inverse fitnesses: {fitness_inv}')
+            print(f'Inverse losses: {loss_inv}')
     return offsprings_list, Fmean_values, mean_t_dist_values, mean_volume_values
         
 ########## UTILITY FUNCTIONS #################
