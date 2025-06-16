@@ -50,7 +50,7 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     loss,_,_ = compute_loss(NetPar,par,verb=verb)                      # Compute the loss value of the network 
     return NetworkParams(J,C,B,G,T,N,loss)           # return the set of updated parameters
     
-def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # JAXXED!
+def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,float,float]:    # JAXXED!
     """Function for computing the loss of a given network.
 
     Args:
@@ -59,7 +59,7 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> float:    # J
         verb (bool, optional): verbosity. Defaults to False.
 
     Returns:
-        float: computed loss of the network. 
+        tuple[float,float,float]: overall loss, target distance loss and volume cost. 
     """
     loss = 0.                # I need this check, bc otherwise I risk adding loss over loss 
     target_dists = 0.
