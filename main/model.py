@@ -72,7 +72,7 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
         #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
         add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
-        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
+        target_dist = np.abs((par['target_set'][i] - output)/10)                            # square distance between network output and target (theoretical) output
         volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         '''
         dist = shortest_distance(NetPar.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
@@ -217,7 +217,7 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     loss_m,_,_ = compute_loss(NetPar,par,verb=gen_verb)
     return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,loss_m)
     
-def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list]:
+def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> tuple[list,list,list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
     Args:
@@ -265,6 +265,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
             for sol in solutions:
                 solutions_old.append(copy.deepcopy(sol))
         '''
+        '''
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
@@ -292,6 +293,22 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if len(offsprings_list) != par['N_sol']:      # check population conservation
             print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
             raise ValueError
+        '''
+        # SELECTION
+        solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
+        n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
+        offspring = solutions[:n_parents]   # I take the best n_parents individuals as parents 
+        for i in range(len(offspring)):
+            offspring[i] = mutation(offspring[i],par,gen_verb)  # NO REPRODUCTION, ONLY MUTATION
+        # RANDOM GENERATION
+        for i in range(n_parents,par['N_sol']):
+            sol = generate(par)
+            offspring.append(sol)
+        nrd.shuffle(offspring)     # shuffle the new population for good measure
+        solutions = offspring         # set the offsprings as the new population
+        if len(offspring) != par['N_sol']:      # check population conservation
+            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offspring)}, expected {par['N_sol']}')
+            raise ValueError
         # Compute the loss
         t_dists = []                # Container for target distance for each solution
         volumes = []                # Container for volume costs for each solution
@@ -308,22 +325,22 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Parents indexes: {parents_idx}')
-            print(f'Selection Probabilities: {prob}')
-            print(f'Inverse losses: {loss_inv}')
+            #print(f'Parents indexes: {parents_idx}')
+            #print(f'Selection Probabilities: {prob}')
+            #print(f'Inverse losses: {loss_inv}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Parents indexes: {parents_idx}')
-            print(f'Selection Probabilities: {prob}')
-            print(f'Inverse losses: {loss_inv}')
+            #print(f'Parents indexes: {parents_idx}')
+            #print(f'Selection Probabilities: {prob}')
+            #print(f'Inverse losses: {loss_inv}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Parents indexes: {parents_idx}')
-            print(f'Selection Probabilities: {prob}')
-            print(f'Inverse losses: {loss_inv}')
-    return offsprings_list, Fmean_values, mean_t_dist_values, mean_volume_values
+            #print(f'Parents indexes: {parents_idx}')
+            #print(f'Selection Probabilities: {prob}')
+            #print(f'Inverse losses: {loss_intinv}')
+    return offspring, Fmean_values, mean_t_dist_values, mean_volume_values
         
 ########## UTILITY FUNCTIONS #################
 def plot_T(T:np.ndarray,par:dict) -> None:
