@@ -72,8 +72,8 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
         #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
         #add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
-        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
-        volume_cost = np.sum(NetPar.C.reshape(-1))/norm_factor                # average wiring volume cost (i.e. # of links)
+        target_dist = np.abs((par['target_set'][i] - output)/10)                            # square distance between network output and target (theoretical) output
+        volume_cost = (np.sum(NetPar.C.reshape(-1))/norm_factor)**2                # average wiring volume cost (i.e. # of links)
         '''
         dist = shortest_distance(NetPar.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
         dist = np.where(dist >= 2147483647, 0, dist)                               # set each value that overflows (bc no path exists) to 0
@@ -134,14 +134,14 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     Returns:
         tuple[NetworkParams,NetworkParams]: pair of offsprings_list.
     """   
-    # Implements the crossover ricombination given 2 parent NetworkParams and returns 2 offspring NetworksParams.
+    # Implements the crossover ricombination given 2 parent NetworkParams
+    # and returns 2 offspring NetworksParams.
     if par1.C.shape != par2.C.shape:
         print(f'Error: length mismatch between the connectivity matrices of the two parents! Got parent1={par1.C.shape} and parent2={par2.C.shape}')
         raise ValueError
     if par1.T.shape != par2.T.shape:
         print(f'Error: length mismatch between the T matrices of the two parents! Got parent1={par1.T.shape} and parent2={par2.T.shape}')
         raise ValueError
-    '''
     # First, I do C crossover
     cut_idx = nrd.choice(np.arange(len(par1.C)))  # randomly pick where to cut the chromosomes
     C1 = np.append(par1.C.reshape(-1)[:cut_idx],par2.C.reshape(-1)[cut_idx:]).reshape(par1.C.shape)      # create the new C matrices by crossover
@@ -156,10 +156,6 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     B2 = np.append(par2.B.reshape(-1)[:cut_idx],par1.B.reshape(-1)[cut_idx:]).reshape(par1.B.shape)
     B1 *= C1        # eliminate the biases for non existing links
     B2 *= C2
-    # Now I set the other elements of NetPar that are not affected by the crossover
-    G1 = Graph(np.column_stack(np.nonzero(C1)))                       # Generate the Graph given the connectivity matrix
-    G2 = Graph(np.column_stack(np.nonzero(C2)))      
-    '''
     # Now T crossover
     cut_idx = nrd.choice(np.arange(par1.T.shape[1]),par1.T.shape[0])  # randomly pick where to cut each cell's T coefficients string
     T1 = np.zeros((par1.T.shape),dtype=np.complex128)           # I have to specify the type because otherwise when casting it as a complex value from par.T 
@@ -167,8 +163,17 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     for cell in range(par1.T.shape[0]):      # I have to use this loop because append only works with one dimensional arrays
         T1[cell,:] = np.append(par1.T[cell,:cut_idx[cell]],par2.T[cell,cut_idx[cell]:])
         T2[cell,:] = np.append(par2.T[cell,:cut_idx[cell]],par1.T[cell,cut_idx[cell]:])
-    #return (NetworkParams(J1,C1,B1,G1,T1,par1.N), NetworkParams(J2,C2,B2,G2,T2,par1.N))
-    return (NetworkParams(par1.J,par1.C,par1.B,par1.G,T1,par1.N), NetworkParams(par2.J,par2.C,par2.B,par2.G,T2,par1.N))
+    # Now I set the other elements of NetPar that are not affected by the crossover
+    G1 = Graph(np.column_stack(np.nonzero(C1)))                       # Generate the Graph given the connectivity matrix
+    G2 = Graph(np.column_stack(np.nonzero(C2)))      
+    # LE PROSSIME RIGHE SONO COMMENTATE PERCHé PER ORA NON MI SERVE CHE QUESTA FUNZIONE CALCOLI ANCHE LA loss, PERCHé
+    # LO FA LA FUNZIONE MUTATION, CHE PER ORA VIENE SEMPRE ESEGUITA UNA VOLTA CHE VIENE ESEGUITA QUESTA                 
+    #NetPar1 = NetworkParams(J1,C1,B1,G1,T1,par1.N)
+    #NetPar2 = NetworkParams(J2,C2,B2,G2,T2,par1.N)
+    #loss1 = compute_loss(par,NetPar1)
+    #loss2 = compute_loss(par,NetPar2)
+    #return [NetworkParams(J1,C1,B1,G1,T1,par1.N,loss1), NetworkParams(J2,C2,B2,G2,T2,par1.N,loss2)]
+    return (NetworkParams(J1,C1,B1,G1,T1,par1.N), NetworkParams(J2,C2,B2,G2,T2,par1.N))
     
 def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     """Function to mutate a given network.
@@ -273,13 +278,12 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         # REPRODUCTION
         offsprings_list = []
         for pair in range(len(parents_idx)):
-            if nrd.uniform() <= par['T_crossover_ratio']:
-                children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
-            else:
-                children = [solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]]]                   # no crossover, only mutation
-            offspring0 = mutation(children[0],par,gen_verb=gen_verb)     # mutate them (here also the loss is computed, see mutation function definition)
+            #children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
+            #offspring0 = mutation(children[0],par,gen_verb=gen_verb)     # mutate them (here also the loss is computed, see mutation function definition)
+            offspring0 = mutation(solutions[parents_idx[pair,0]],par,gen_verb=gen_verb)     # mutate them (here also the loss is computed, see mutation function definition)
             offsprings_list.append(offspring0)          # add them to the new population
-            offspring1 = mutation(children[1],par,gen_verb=gen_verb)
+            #offspring1 = mutation(children[1],par,gen_verb=gen_verb)
+            offspring1 = mutation(solutions[parents_idx[pair,1]],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
         # RANDOM GENERATION
         for _ in range(par['N_sol']-n_parents):
@@ -290,6 +294,23 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if len(offsprings_list) != par['N_sol']:      # check population conservation
             print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
             raise ValueError
+        '''
+        # SELECTION
+        solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
+        n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
+        offspring = solutions[:n_parents]   # I take the best n_parents individuals as parents 
+        for i in range(len(offspring)):
+            offspring[i] = mutation(offspring[i],par,gen_verb)  # NO REPRODUCTION, ONLY MUTATION
+        # RANDOM GENERATION
+        for i in range(n_parents,par['N_sol']):
+            sol = generate(par)
+            offspring.append(sol)
+        nrd.shuffle(offspring)     # shuffle the new population for good measure
+        solutions = offspring         # set the offsprings as the new population
+        if len(offspring) != par['N_sol']:      # check population conservation
+            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offspring)}, expected {par['N_sol']}')
+            raise ValueError
+        '''
         # Compute the loss
         t_dists = []                # Container for target distance for each solution
         volumes = []                # Container for volume costs for each solution
@@ -306,24 +327,18 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True,gen_verb:bool=False) -> t
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean volume: {mean_volume}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss_inv}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean volume: {mean_volume}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss_inv}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
-            print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean volume: {mean_volume}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss_intinv}')
