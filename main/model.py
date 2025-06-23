@@ -38,7 +38,7 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
         NetworkParams: returns the new network's parameters set. 
     """
     N = par['L']**2                                     # fully-populated squared lattice, number of cells = side**2
-    C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) - np.eye(N)      # initialize with a given link density and no self links                                 
+    C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                 
     J = nrd.uniform(low=par['J_range'][0],high=par['J_range'][1],size=(N,N)) * C                # uniformly populate the weights in the weight matrix J                                       
     B = nrd.normal(size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 1 the biases (spero vada bene fatto così)
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
@@ -86,6 +86,8 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         links += link_cost
         loss += target_dist #+ link_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
     loss /= len(par['input_set'])    
+    target_dists /= len(par['input_set'])    
+    links /= len(par['input_set'])    
     return loss, target_dists, links
     
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
@@ -102,7 +104,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
     """
     state = nrd.normal(loc=0.5,size=(NetPar.N,))        # Randomly assign a state value to each cell distributed as a normal around 0.5
     state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
-    state[(par['L'] - 1) * par['L']-1] = input[1]    # cell in the lower left corner of the 2D lattice
+    state[par['L']] = input[1]    # cell in the lower left corner of the 2D lattice
     '''
     # Precompute the contributions for each cell to optimize the loop (this is incredibly faster)
     contributions = np.dot(NetPar.C * NetPar.J, state) + np.sum(NetPar.B, axis=1)      # weight x value + bias - contributions così ha shape = state.shape
@@ -280,8 +282,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,early_stop:bool=True) -> t
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = []
-        loss_inv = np.array([1/(sol.loss**2) for sol in solutions]) 
-        prob = loss_inv / np.sum(loss_inv)        # define the extraction probability for being a parent as the (normalized) inverse of the loss
+        loss = np.array([sol.loss for sol in solutions]) 
+        prob = np.exp(-loss) / np.sum(np.exp(-loss))        # define the extraction probability for being a parent as the softmax of the negative loss
         for _ in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx.append(pair)
@@ -323,26 +325,26 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,early_stop:bool=True) -> t
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
             print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean link: {mean_link}')
-            #print(f'Parents indexes: {parents_idx}')
-            #print(f'Selection Probabilities: {prob}')
-            #print(f'Inverse losses: {loss_inv}')
+            #print(f'Mean link: {mean_link}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse losses: {loss}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
             print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean link: {mean_link}')
-            #print(f'Parents indexes: {parents_idx}')
-            #print(f'Selection Probabilities: {prob}')
-            #print(f'Inverse losses: {loss_inv}')
+            #print(f'Mean link: {mean_link}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse losses: {loss}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_fit}')
             print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean link: {mean_link}')
-            #print(f'Parents indexes: {parents_idx}')
-            #print(f'Selection Probabilities: {prob}')
-            #print(f'Inverse losses: {loss_intinv}')
+            #print(f'Mean link: {mean_link}')
+            print(f'Parents indexes: {parents_idx}')
+            print(f'Selection Probabilities: {prob}')
+            print(f'Inverse losses: {loss}')
     return offsprings_list, Fmean_values, mean_t_dist_values, mean_link_values
         
 ########## UTILITY FUNCTIONS #################
