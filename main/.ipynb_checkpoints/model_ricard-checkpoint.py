@@ -40,9 +40,8 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
         NetworkParams: returns the new network's parameters set. 
     """
     N = par['L']**2                                     # fully-populated squared lattice, number of cells = side**2
-    C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                  
-    J = nrd.normal(0,0.25,(N,N)) * C                 
-    J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
+    C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                 
+    J = nrd.uniform(low=par['J_range'][0],high=par['J_range'][1],size=(N,N)) * C                # uniformly populate the weights in the weight matrix J                                       
     B = nrd.normal(size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 1 the biases (spero vada bene fatto così)
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     T = np.zeros(N)                                 # the transfer function is initialized as a constant 
@@ -103,10 +102,10 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
     Returns:
         float: output of the 'feed-forward'.
     """
-    state = np.zeros(NetPar.N)        # Initialize each cell's state to zero.
-    '''
+    state = nrd.normal(loc=0.5,size=(NetPar.N,))        # Randomly assign a state value to each cell distributed as a normal around 0.5
     state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
     state[par['L']] = input[1]    # cell in the upper right corner of the 2D lattice
+    '''
     # Precompute the contributions for each cell to optimize the loop (this is incredibly faster)
     contributions = np.dot(NetPar.C * NetPar.J, state) + np.sum(NetPar.B, axis=1)      # weight x value + bias - contributions così ha shape = state.shape
     # Retrive the T function of each cell by doing ifft and then fit/interpolation
@@ -117,6 +116,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
         coeff = np.polyfit(par['x_n'],f_n[cell,:],3)    # fit the series of function value with a polynomial of degree up to 2
         new_fun = np.poly1d(coeff)                      # generate the new functional from the fit results
         state[cell] = new_fun(contributions[cell])    # apply the new functional as the T function for the associated cell
+    '''
     # Retrive the T function of each cell by doing ifft and then fit/interpolation
     for t in range(par['ff_iter']):
         for cell in range(1,NetPar.N):                  # from 1 (included) so to skip the update of the 1st input cell
@@ -124,27 +124,19 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
             if cell == par['L']:
                 continue                                    # skip the update of the 2nd input cell
             transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T[cell]*x)) - par['gamma']/2      # define the transfer function given the gain parameter
-            state = transfer(contributions)                             # apply the transfer function
+            new_state = transfer(contributions)                             # apply the transfer function
+            '''
             # set boundary conditions on the state (done like this is wrong, I should do it on the transfer function's construction)
-            if state < par['state_bound'][0]:
-                state = par['state_bound'][0]
-            if state > par['state_bound'][1]:
-                state = par['state_bound'][1]
-            state[cell] = state     # apply the new functional as the T function for the associated cell
-    '''
-    for t in range(par['ff_iter']):
-        state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
-        state[par['L']] = input[1]                   # cell in the upper right corner of the 2D lattice
-        if verb > 0:
-            print(f'Pre-state:{state}')
-        transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T*x)) - par['gamma']/2
-        state = transfer(np.matmul(NetPar.J,state) + NetPar.B)
-        if verb > 0:
-            print(f'State #{t}: {state}')
+            if new_state < par['state_bound'][0]:
+                new_state = par['state_bound'][0]
+            if new_state > par['state_bound'][1]:
+                new_state = par['state_bound'][1]
+            '''
+            state[cell] = new_state     # apply the new functional as the T function for the associated cell
     output = np.mean(state[int(par['majority_ratio']*par['L']):-1])                          # output as the mean of the value of a group of neurons (majority rule)
     if verb > 0 and verb < 1: 
         print(f'State of each cell: {state}')
-    if verb > 0: 
+    if verb > 1: 
         return output, state
     return output
 
@@ -305,11 +297,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
-        # ELITIST CONSERVATION
-        n_elite = int(par['N_sol'] * par['elitist_ratio'])
-        offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
         # RANDOM GENERATION
-        for _ in range(par['N_sol']-n_parents-n_elite):
+        for _ in range(par['N_sol']-n_parents):
             sol = generate(par)
             offsprings_list.append(sol)
         random.shuffle(offsprings_list)     # shuffle the new population for good measure
@@ -342,12 +331,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_loss}')
-            print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            if iter == 0:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            else:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
+            print(f'Mean target distance: {mean_t_dist}')
             #print(f'Mean link: {mean_link}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
@@ -355,12 +339,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_loss}')
-            print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            if iter == 0:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            else:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
+            print(f'Mean target distance: {mean_t_dist}')
             #print(f'Mean link: {mean_link}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
@@ -368,13 +347,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         elif verb == 3: 
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {mean_loss}')
-            print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            if iter == 0:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
-            else:
-                print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
+            print(f'Mean target distance: {mean_t_dist}')
             #print(f'Mean link: {mean_link}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
