@@ -326,7 +326,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
                 _,t_dist, link = compute_loss(sol,par)
                 dist = shortest_distance(sol.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
                 dist = np.where(dist >= 2147483647, 0, dist)                               # set each value that overflows (bc no path exists) to 0          # average wiring length cost
-                path_cost = np.sum(dist,axis=(0,1))/sol.G.num_vertices()**2-sol.G.num_vertices()  
+                path_cost = np.sum(dist,axis=(0,1))/(sol.G.num_vertices()**2-sol.G.num_vertices())  
                 asps[s] = path_cost
                 t_dists[s] = t_dist
                 links[s] = link
