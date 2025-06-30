@@ -133,15 +133,18 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
             state[cell] = state     # apply the new functional as the T function for the associated cell
     '''
     for t in range(par['ff_iter']):
-        state[0] = input[0]                        # cell in the upper left corner of the 2D lattice
-        state[par['L']] = input[1]                   # cell in the upper right corner of the 2D lattice
+        state[2] = input[0]                        # cell in the upper left corner of the 2D lattice
+        state[2*par['L']] = input[1]                   # cell in the upper right corner of the 2D lattice
         if verb > 0:
             print(f'Pre-state:{state}')
         transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T*x)) - par['gamma']/2
         state = transfer(np.matmul(NetPar.J,state) + NetPar.B)
         if verb > 0:
             print(f'State #{t}: {state}')
-    output = np.mean(state[int(par['majority_ratio']*par['L']):-1])                          # output as the mean of the value of a group of neurons (majority rule)
+    if par['majority_ratio'] is not None:
+        output = np.mean(state[int(par['majority_ratio']*par['L']):-1])                          # output as the mean of the value of a group of neurons (majority rule)
+    else:
+        output = state[-1]
     if verb > 0 and verb < 1: 
         print(f'State of each cell: {state}')
     if verb > 0: 
@@ -289,7 +292,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = []
         loss = np.array([sol.loss for sol in solutions]) 
-        prob = np.exp(-par['tau']*loss) / np.sum(np.exp(-par['tau']*loss))        # define the extraction probability for being a parent as the softmax of the negative loss
+        prob = np.exp(-par['tau']*(loss)**2) / np.sum(np.exp(-par['tau']*(loss)**2))        # define the extraction probability for being a parent as the softmax of the negative loss
         for _ in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx.append(pair)
@@ -305,13 +308,19 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
+        best_loss = np.min([sol.loss for sol in solutions])
+        if best_loss < 0.1:
+            print(f'Random generation stopped at iteration #{iter}')
+            n_elite = par['N_sol']-n_parents
+        else:
+            n_elite = int(par['N_sol'] * par['elitist_ratio'])
         # ELITIST CONSERVATION
-        n_elite = int(par['N_sol'] * par['elitist_ratio'])
         offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
-        # RANDOM GENERATION
-        for _ in range(par['N_sol']-n_parents-n_elite):
-            sol = generate(par)
-            offsprings_list.append(sol)
+        if not best_loss < 0.1:
+            # RANDOM GENERATION
+            for _ in range(par['N_sol']-n_parents-n_elite):
+                sol = generate(par)
+                offsprings_list.append(sol)
         random.shuffle(offsprings_list)     # shuffle the new population for good measure
         solutions = offsprings_list         # set the offsprings as the new population
         if len(offsprings_list) != par['N_sol']:      # check population conservation
