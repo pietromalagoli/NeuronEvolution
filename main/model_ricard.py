@@ -43,7 +43,7 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                  
     J = nrd.normal(0,0.25,(N,N)) * C                 
     J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
-    B = nrd.normal(size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 1 the biases (spero vada bene fatto così)
+    B = nrd.normal(0,0.25,size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 0.25 the biases 
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     T = np.zeros(N)                                 # the transfer function is initialized as a constant 
     NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the loss argument so it stays as default (-1)
@@ -68,27 +68,27 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         output = ff(input,NetPar,par)
         if verb:
             print(f'Input: {input} -> Output: {output}')
-        norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
+        #norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
         #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
         #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
         #add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
         target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
-        idx = np.arange(NetPar.N)
-        row_idx = idx // par['L']
-        col_idx = idx % par['L']
-        row_diff = row_idx[:, None] - row_idx[None, :]
-        col_diff = col_idx[:, None] - col_idx[None, :]
-        dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
-        link_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average wiring link cost (combination of strenght of link and length of link)    
-        if verb:
-            print(f'Target distance:{target_dist}')
-            print(f'Link cost:{link_cost}')
-        target_dists += target_dist
-        links += link_cost
+        #idx = np.arange(NetPar.N)
+        #row_idx = idx // par['L']
+        #col_idx = idx % par['L']
+        #row_diff = row_idx[:, None] - row_idx[None, :]
+        #col_diff = col_idx[:, None] - col_idx[None, :]
+        #dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
+        #link_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average wiring link cost (combination of strenght of link and length of link)    
+        #if verb:
+            #print(f'Target distance:{target_dist}')
+            #print(f'Link cost:{link_cost}')
+        #target_dists += target_dist
+        #links += link_cost
         loss += target_dist #+ link_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
     loss /= len(par['input_set'])    
-    target_dists /= len(par['input_set'])    
-    links /= len(par['input_set'])    
+    #target_dists /= len(par['input_set'])    
+    #links /= len(par['input_set'])    
     return loss, target_dists, links
     
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
@@ -132,20 +132,16 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
                 state = par['state_bound'][1]
             state[cell] = state     # apply the new functional as the T function for the associated cell
     '''
+    transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T*x)) - par['gamma']/2    # transfer function as a sigmoid with trainable gain parameter (slope)
     for t in range(par['ff_iter']):
-        state[2] = input[0]                        # cell in the upper left corner of the 2D lattice
+        state[par['L']//2] = input[0]                        # cell in the upper left corner of the 2D lattice
         state[2*par['L']] = input[1]                   # cell in the upper right corner of the 2D lattice
-        if verb > 0:
-            print(f'Pre-state:{state}')
-        transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T*x)) - par['gamma']/2
         state = transfer(np.matmul(NetPar.J,state) + NetPar.B)
-        if verb > 0:
-            print(f'State #{t}: {state}')
     if par['majority_ratio'] is not None:
         output = np.mean(state[int(par['majority_ratio']*par['L']):-1])                          # output as the mean of the value of a group of neurons (majority rule)
     else:
         output = state[-1]
-    if verb > 0 and verb < 1: 
+    if verb > 1: 
         print(f'State of each cell: {state}')
     if verb > 0: 
         return output, state
@@ -210,10 +206,14 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     col_idx = idx % par['L']
     row_diff = row_idx[:, None] - row_idx[None, :]
     col_diff = col_idx[:, None] - col_idx[None, :]
-    dist_matrix = np.sqrt(row_diff**2 + col_diff**2) + np.eye(n.N)      # I add the np.eye so to avoid a division by zero in the next line
+    #dist_matrix = np.sqrt(row_diff**2 + col_diff**2)      
+    #prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
+    #   par['p_self_link'],np.exp(-0.188*dist_matrix))       # link probability decays exponentially with the distance (from literature, 
+    dist_matrix = np.sqrt(row_diff**2 + col_diff**2) + np.eye(n.N)     
     prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
-        par['p_self_link'],np.abs(1/dist_matrix-np.eye(n.N)))       # 1/dist_matrix - np.eye to erase the previous addition (it does not make an actual difference 
-                                                                    # because the elements on the diagonal are dictated by par['p_self_link])
+    par['p_self_link'],1/dist_matrix - np.eye(n.N))       # link probability decays exponentially with the distance (from literature, 
+                                                                                            # https://www.sciencedirect.com/science/article/pii/S0896627313006600#sec2 - pag.3)
+
     mutationC = np.where(nrd.binomial(n=1,p=np.array(prob_matrix)),1,0)    # Generate C (binomial distribution with n=1 is the Bernoulli distribution) 
     C_m = n.C * mutationC   # Apply the mutation
     ## Mutate J
@@ -226,7 +226,7 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
                                                                             # bc JAX only gives the unit normal)
     B_m = n.B + mutationB        # Apply the mutation and eliminate biases for non existing links
     # Mutate the T function
-    mutationT = par['T_mutation_radius']*nrd.normal(size=n.T.shape)   # mutation as gaussian noise (I multiply for the sd 
+    mutationT = par['T_mutation_radius']*par['L']*nrd.normal(size=n.T.shape)   # mutation as gaussian noise (I multiply for the sd 
                                                                             # bc JAX only gives the unit normal)
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
@@ -234,7 +234,7 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     loss_m,_,_ = compute_loss(NetPar,par,verb=gen_verb)
     return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,loss_m)
     
-def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[list,list,list,list]:
+def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop:bool=True) -> tuple[list,list,list,list,list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
     Args:
@@ -253,29 +253,26 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
     if par['N_sol'] % 2 != 0:     # N_sol must be even
         print(f'Error:The number of solutions N_sol must be an even positive number.')
         raise ValueError
+    solutions = []              # Generate the initial batch of solutions
     if stat:
-        solutions = []              # Generate the initial batch of solutions
-        t_dists = []                # Container for target distance for each solution
-        links = []                # Container for link costs for each solution
-    for _ in range(par['N_sol']):
+        t_dists = np.zeros(par['N_sol'])                # Container for target distance for each solution
+        links = np.zeros(par['N_sol'])                # Container for link costs for each solution
+    for s in range(par['N_sol']):
         # Generate a solution
         sol = generate(par,verb=gen_verb)     # already computes also the loss value
         solutions.append(sol)
         if stat:
             _,t_dist, link = compute_loss(sol,par)
-            t_dists.append(t_dist)
-            links.append(link)
+            t_dists[s] = t_dist
+            links[s] = link
     if stat:
-        mean_t_dist = np.mean(t_dists)
-        mean_link = np.mean(links)
         Lmean_values = np.zeros(par['n_iter'])               # Initiate some container for statistic
         mean_t_dist_values = np.zeros(par['n_iter'])         # Container for mean target distance
         mean_link_values = np.zeros(par['n_iter'])         # Container for mean link cost
         mean_asp_values = np.zeros(par['n_iter'])                   # Mean average shortest path length over the solutions
-        mean_t_dist_values[0] = mean_t_dist
-        mean_link_values[0] = mean_link
-        mean_loss = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_loss method
-        Lmean_values[0] = mean_loss   # statistics
+        mean_t_dist_values[0] = np.mean(t_dists)
+        mean_link_values[0] = np.mean(links)
+        Lmean_values[0] = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']   # statistics
         loss_ev = np.zeros((par['N_sol'],par['n_iter']))        #store losses
     
     ##  EVOLUTION
@@ -290,17 +287,16 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
-        parents_idx = []
+        parents_idx = np.zeros((int(n_parents/2),2),dtype=int)
         loss = np.array([sol.loss for sol in solutions]) 
         prob = np.exp(-par['tau']*(loss)**2) / np.sum(np.exp(-par['tau']*(loss)**2))        # define the extraction probability for being a parent as the softmax of the negative loss
-        for _ in range(int(n_parents/2)):
+        for i in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
-            parents_idx.append(pair)
-        parents_idx = np.array(parents_idx)
+            parents_idx[i,:] = pair
         # REPRODUCTION
         offsprings_list = []
         for pair in range(len(parents_idx)):
-            if nrd.uniform() <= par['T_crossover_ratio']:
+            if nrd.uniform() <= par['crossover_ratio']:
                 children = crossover(solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]])    # generate 2 offspring by crossover
             else:
                 children = [solutions[parents_idx[pair,0]],solutions[parents_idx[pair,1]]]                   # no crossover, only mutation
@@ -309,7 +305,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
         best_loss = np.min([sol.loss for sol in solutions])
-        if best_loss < 0.1:
+        if best_loss < 0.1:         # stop random generation if a good solutions has already been found
             print(f'Random generation stopped at iteration #{iter}')
             n_elite = par['N_sol']-n_parents
         else:
@@ -324,7 +320,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
         random.shuffle(offsprings_list)     # shuffle the new population for good measure
         solutions = offsprings_list         # set the offsprings as the new population
         if len(offsprings_list) != par['N_sol']:      # check population conservation
-            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {par['N_sol']}')
+            print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {len(t_dists)}')
             raise ValueError
         if stat:
             # Compute the loss
@@ -339,18 +335,14 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
                 asps[s] = path_cost
                 t_dists[s] = t_dist
                 links[s] = link
-            mean_asp = np.mean(asps)
-            mean_t_dist = np.mean(t_dists)
-            mean_link = np.mean(links)
-            mean_t_dist_values[iter] = mean_t_dist
-            mean_link_values[iter] = mean_link
-            mean_asp_values[iter] = mean_asp
+            mean_t_dist_values[iter] = np.mean(t_dists)
+            mean_link_values[iter] = np.mean(links)
+            mean_asp_values[iter] = np.mean(asps)
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
-            mean_loss = np.mean([sol.loss for sol in solutions])    # Here I don't have to divide also by 4, because I've already done it in the compute_loss method
-            Lmean_values[iter] = mean_loss   # statistics
+            Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
-            print(f'Mean loss: {mean_loss}')
+            print(f'Mean loss: {Lmean_values[iter]}')
             print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             if iter == 0:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
@@ -363,20 +355,20 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
             #print(f'Inverse losses: {loss}')
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
-            print(f'Mean loss: {mean_loss}')
+            print(f'Mean loss: {Lmean_values[iter]}')
             print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             if iter == 0:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
             #print(f'Mean target distance: {mean_t_dist}')
-            #print(f'Mean link: {mean_link}')
+            print(f'Mean link: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
         elif verb == 3: 
             print(f'Iteration #{iter}...')
-            print(f'Mean loss: {mean_loss}')
+            print(f'Mean loss: {Lmean_values[iter]}')
             print(f'Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             if iter == 0:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
@@ -388,6 +380,10 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False) -> tuple[
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
+        if early_stop:
+            if np.sum(loss_ev[:, iter] < 0.01) >= 0.75*par['N_sol']:        # check if at least the 75% of solutions has loss lower than 0.01
+                print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
+                break
     if stat:
         return offsprings_list, Lmean_values, mean_t_dist_values, mean_link_values, loss_ev, mean_asp_values
     else:
