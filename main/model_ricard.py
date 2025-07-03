@@ -234,7 +234,7 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     loss_m,_,_ = compute_loss(NetPar,par,verb=gen_verb)
     return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,loss_m)
     
-def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop:bool=True) -> tuple[list,list,list,list,list,list]:
+def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop:bool=True) -> tuple[list,list,list,list,list,list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
     Args:
@@ -270,6 +270,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         mean_t_dist_values = np.zeros(par['n_iter'])         # Container for mean target distance
         mean_link_values = np.zeros(par['n_iter'])         # Container for mean link cost
         mean_asp_values = np.zeros(par['n_iter'])                   # Mean average shortest path length over the solutions
+        T_values = np.zeros((par['N_sol'],par['L']**2,par['n_iter']))            # Values of the gain parameter for each network's each cell at each iteration
         mean_t_dist_values[0] = np.mean(t_dists)
         mean_link_values[0] = np.mean(links)
         Lmean_values[0] = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']   # statistics
@@ -340,6 +341,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             mean_asp_values[iter] = np.mean(asps)
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
             Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
+            T_values[:,:,iter] = np.array([sol.T for sol in solutions])
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {Lmean_values[iter]}')
@@ -380,12 +382,12 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
-        if early_stop:
+        if early_stop:      # very bare-bones version of early stop
             if np.sum(loss_ev[:, iter] < 0.01) >= 0.75*par['N_sol']:        # check if at least the 75% of solutions has loss lower than 0.01
                 print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
                 break
     if stat:
-        return offsprings_list, Lmean_values, mean_t_dist_values, mean_link_values, loss_ev, mean_asp_values
+        return offsprings_list, Lmean_values, mean_t_dist_values, mean_link_values, loss_ev, mean_asp_values, T_values
     else:
         return offsprings_list
         
