@@ -63,7 +63,7 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
     """
     loss = 0.                # I need this check, bc otherwise I risk adding loss over loss 
     target_dists = 0.
-    links = 0.
+    weights = 0.
     for i,input in enumerate(par['input_set']):
         output = ff(input,NetPar,par)
         if verb:
@@ -79,17 +79,17 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         #row_diff = row_idx[:, None] - row_idx[None, :]
         #col_diff = col_idx[:, None] - col_idx[None, :]
         #dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
-        #link_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average wiring link cost (combination of strenght of link and length of link)    
+        #weight_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average weights cost (combination of strenght of link and length of link)    
         #if verb:
             #print(f'Target distance:{target_dist}')
-            #print(f'Link cost:{link_cost}')
+            #print(f'Weight cost:{weight_cost}')
         #target_dists += target_dist
-        #links += link_cost
-        loss += target_dist #+ link_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
+        #weights += weight_cost
+        loss += target_dist #+ weight_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
     loss /= len(par['input_set'])    
     #target_dists /= len(par['input_set'])    
-    #links /= len(par['input_set'])    
-    return loss, target_dists, links
+    #weights /= len(par['input_set'])    
+    return loss, target_dists, weights
     
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
@@ -256,23 +256,23 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
     solutions = []              # Generate the initial batch of solutions
     if stat:
         t_dists = np.zeros(par['N_sol'])                # Container for target distance for each solution
-        links = np.zeros(par['N_sol'])                # Container for link costs for each solution
+        weights = np.zeros(par['N_sol'])                # Container for link costs for each solution
     for s in range(par['N_sol']):
         # Generate a solution
         sol = generate(par,verb=gen_verb)     # already computes also the loss value
         solutions.append(sol)
         if stat:
-            _,t_dist, link = compute_loss(sol,par)
+            _,t_dist, weight = compute_loss(sol,par)
             t_dists[s] = t_dist
-            links[s] = link
+            weights[s] = weight
     if stat:
         Lmean_values = np.zeros(par['n_iter'])               # Initiate some container for statistic
         mean_t_dist_values = np.zeros(par['n_iter'])         # Container for mean target distance
-        mean_link_values = np.zeros(par['n_iter'])         # Container for mean link cost
+        mean_weight_values = np.zeros(par['n_iter'])         # Container for mean link cost
         mean_asp_values = np.zeros(par['n_iter'])                   # Mean average shortest path length over the solutions
         T_values = np.zeros((par['N_sol'],par['L']**2,par['n_iter']))            # Values of the gain parameter for each network's each cell at each iteration
         mean_t_dist_values[0] = np.mean(t_dists)
-        mean_link_values[0] = np.mean(links)
+        mean_weight_values[0] = np.mean(weights)
         Lmean_values[0] = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']   # statistics
         loss_ev = np.zeros((par['N_sol'],par['n_iter']))        #store losses
     
@@ -329,15 +329,15 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             links = np.zeros(len(solutions))                # Container for link costs for each solution
             asps = np.zeros(len(solutions))
             for s,sol in enumerate(solutions): 
-                _,t_dist, link = compute_loss(sol,par)
+                _,t_dist, weight = compute_loss(sol,par)
                 dist = shortest_distance(sol.G, directed=True).get_2d_array()            # calculate the shortest path length for each pair of vertecies
                 dist = np.where(dist >= 2147483647, 0, dist)                               # set each value that overflows (bc no path exists) to 0          # average wiring length cost
                 path_cost = np.sum(dist,axis=(0,1))/(sol.G.num_vertices()**2-sol.G.num_vertices())  
                 asps[s] = path_cost
                 t_dists[s] = t_dist
-                links[s] = link
+                weights[s] = weight
             mean_t_dist_values[iter] = np.mean(t_dists)
-            mean_link_values[iter] = np.mean(links)
+            mean_weight_values[iter] = np.mean(weights)
             mean_asp_values[iter] = np.mean(asps)
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
             Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
@@ -351,7 +351,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
             #print(f'Mean target distance: {mean_t_dist}')
-            #print(f'Mean link: {mean_link}')
+            #print(f'Mean weight cost: {mean_weight}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -364,7 +364,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
             #print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean link: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
+            print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
+            #print(f'Mean weight cost: {mean_weight}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -378,16 +379,23 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
             #print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
             #print(f'Mean target distance: {mean_t_dist}')
-            #print(f'Mean link: {mean_link}')
+            #print(f'Mean weight cost: {mean_weight}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
         if early_stop:      # very bare-bones version of early stop
-            if np.sum(loss_ev[:, iter] < 0.01) >= 0.75*par['N_sol']:        # check if at least the 75% of solutions has loss lower than 0.01
+            if np.sum(loss_ev[:, iter] < 0.01) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
                 print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
+                # Cut statistics arrays at the current iteration
+                Lmean_values = Lmean_values[:iter+1]
+                mean_t_dist_values = mean_t_dist_values[:iter+1]
+                mean_weight_values = mean_weight_values[:iter+1]
+                loss_ev = loss_ev[:, :iter+1]
+                mean_asp_values = mean_asp_values[:iter+1]
+                T_values = T_values[:, :, :iter+1]
                 break
     if stat:
-        return offsprings_list, Lmean_values, mean_t_dist_values, mean_link_values, loss_ev, mean_asp_values, T_values
+        return offsprings_list, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values
     else:
         return offsprings_list
         
