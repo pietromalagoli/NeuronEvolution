@@ -68,27 +68,23 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         output = ff(input,NetPar,par)
         if verb:
             print(f'Input: {input} -> Output: {output}')
-        #norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
-        #target_dist = ((par['target_set'][i] - output)/par['N']**2)**2                            # square distance between network output and target (theoretical) output
-        #target_dist = ((par['target_set'][i] - output))**2                            # square distance between network output and target (theoretical) output
-        #add_target_dist = 2**(np.abs(par['target_set'][i] - output)-10)                            # square distance between network output and target (theoretical) output
+        norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
         target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
-        #idx = np.arange(NetPar.N)
-        #row_idx = idx // par['L']
-        #col_idx = idx % par['L']
-        #row_diff = row_idx[:, None] - row_idx[None, :]
-        #col_diff = col_idx[:, None] - col_idx[None, :]
-        #dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
-        #weight_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average weights cost (combination of strenght of link and length of link)    
-        #if verb:
-            #print(f'Target distance:{target_dist}')
-            #print(f'Weight cost:{weight_cost}')
-        #target_dists += target_dist
-        #weights += weight_cost
-        loss += target_dist #+ weight_cost #+ add_target_dist # take the exponential of the sum of the costs (weighted if needed)
-    loss /= len(par['input_set'])    
-    #target_dists /= len(par['input_set'])    
-    #weights /= len(par['input_set'])    
+        idx = np.arange(NetPar.N)
+        row_idx = idx // par['L']
+        col_idx = idx % par['L']
+        row_diff = row_idx[:, None] - row_idx[None, :]
+        col_diff = col_idx[:, None] - col_idx[None, :]
+        dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
+        weight_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average weights cost (combination of strenght of link and length of link)    
+        if verb:
+            print(f'Target distance:{target_dist}')
+            print(f'Weight cost:{weight_cost}')
+        target_dists += target_dist
+        weights += weight_cost 
+    target_dists /= len(par['input_set'])    
+    weights /= len(par['input_set'])    
+    loss = target_dist + weights
     return loss, target_dists, weights
     
 def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
@@ -250,6 +246,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
     Returns:
         tuple[list,list]: offsprings_list list and mean loss values list.
     """
+    rndm_flag = False           # some flags for avoiding printing warnings multiple times
+    weights_flag = False
     if par['N_sol'] % 2 != 0:     # N_sol must be even
         print(f'Error:The number of solutions N_sol must be an even positive number.')
         raise ValueError
@@ -290,7 +288,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = np.zeros((int(n_parents/2),2),dtype=int)
         loss = np.array([sol.loss for sol in solutions]) 
-        prob = np.exp(-par['tau']*(loss)**2) / np.sum(np.exp(-par['tau']*(loss)**2))        # define the extraction probability for being a parent as the softmax of the negative loss
+        prob = np.exp(-par['tau']*(loss)) / np.sum(np.exp(-par['tau']*(loss)))        # define the extraction probability for being a parent as the softmax of the negative loss
         for i in range(int(n_parents/2)):
             pair = nrd.choice(np.arange(len(solutions)), size=2, replace=False, p=prob)    # Select unique parent indices for each pair (no repeats in a pair, but pairs can overlap)
             parents_idx[i,:] = pair
@@ -307,7 +305,9 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             offsprings_list.append(offspring1)          # add them to the new population
         best_loss = np.min([sol.loss for sol in solutions])
         if best_loss < 0.1:         # stop random generation if a good solutions has already been found
-            print(f'Random generation stopped at iteration #{iter}')
+            if not rndm_flag: 
+                print(f'Random generation stopped at iteration #{iter}')
+                rndm_flag = True
             n_elite = par['N_sol']-n_parents
         else:
             n_elite = int(par['N_sol'] * par['elitist_ratio'])
@@ -363,9 +363,9 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
-            print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
-            #print(f'Mean weight cost: {mean_weight}')
+            print(f'Mean target distance: {mean_t_dist_values[iter]}')
+            #print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
+            print(f'Mean weight cost: {mean_weight_values[iter]}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -383,6 +383,12 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
+        #if np.sum(loss_ev[:, iter] < 0.1) >= 0.8*par['N_sol'] and stat:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
+        if best_loss < 0.05:
+            if not weights_flag: 
+                print(f"Task solved after {iter} iterations. Now weights cost is introduced.")
+                weights_flag = True
+            solutions = [NetworkParams(s.J,s.C,s.B,s.G,s.T,s.N,s.loss + weights[n]) for n,s in enumerate(solutions)]    # add the weights cost to the loss
         if early_stop:      # very bare-bones version of early stop
             if np.sum(loss_ev[:, iter] < 0.01) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
                 print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
@@ -395,9 +401,9 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 T_values = T_values[:, :, :iter+1]
                 break
     if stat:
-        return offsprings_list, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values
+        return solutions, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values
     else:
-        return offsprings_list
+        return solutions
         
 ########## UTILITY FUNCTIONS #################
 def plot_T(g:float,par:dict) -> None:
