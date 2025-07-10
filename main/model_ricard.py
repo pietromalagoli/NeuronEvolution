@@ -41,16 +41,18 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
     """
     N = par['L']**2                                     # fully-populated squared lattice, number of cells = side**2
     C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                  
-    J = nrd.normal(0,0.25,(N,N)) * C                 
-    J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
-    B = nrd.normal(0,0.25,size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 0.25 the biases 
+    #J = nrd.normal(0,0.25,(N,N)) * C                 
+    J = np.zeros((N,N))
+    #J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
+    #B = nrd.normal(0,0.25,size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 0.25 the biases 
+    B = np.zeros((N))
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     T = np.zeros(N)                                 # the transfer function is initialized as a constant 
     NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the loss argument so it stays as default (-1)
     loss,_,_ = compute_loss(NetPar,par,verb=verb)                      # Compute the loss value of the network 
     return NetworkParams(J,C,B,G,T,N,loss)           # return the set of updated parameters
     
-def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,float,float]:    # JAXXED!
+def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,float,float]:    
     """Function for computing the loss of a given network.
 
     Args:
@@ -69,14 +71,14 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         if verb:
             print(f'Input: {input} -> Output: {output}')
         norm_factor = NetPar.G.num_vertices()**2-NetPar.G.num_vertices()            # normalize by N(N-1)
-        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
+        target_dist = np.abs(par['target_set'][i] - output)                            # square distance between network output and target (theoretical) output
         idx = np.arange(NetPar.N)
         row_idx = idx // par['L']
         col_idx = idx % par['L']
         row_diff = row_idx[:, None] - row_idx[None, :]
         col_diff = col_idx[:, None] - col_idx[None, :]
-        dist_matrix = np.sqrt(row_diff**2 + col_diff**2)   
-        weight_cost = np.sum((np.abs(NetPar.J) * dist_matrix))/norm_factor                # average weights cost (combination of strenght of link and length of link)    
+        dist_matrix = np.sqrt(row_diff**2 + col_diff**2)  
+        weight_cost = np.sum(np.abs(NetPar.J) * dist_matrix)/norm_factor                # average weights cost (combination of strenght of link and length of link)    
         if verb:
             print(f'Target distance:{target_dist}')
             print(f'Weight cost:{weight_cost}')
@@ -84,10 +86,10 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         weights += weight_cost 
     target_dists /= len(par['input_set'])    
     weights /= len(par['input_set'])    
-    loss = target_dist + weights
+    loss = target_dists #+ weights
     return loss, target_dists, weights
     
-def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXXED!
+def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     
     """Function to execute the 'feed-forward' computation on a given network, given inputs.
 
     Args:
@@ -129,7 +131,7 @@ def ff(input:list,NetPar:NetworkParams,par:dict,verb:int=0) -> float:     # JAXX
             state[cell] = state     # apply the new functional as the T function for the associated cell
     '''
     transfer = lambda x: par['gamma'] / (1+np.exp(-NetPar.T*x)) - par['gamma']/2    # transfer function as a sigmoid with trainable gain parameter (slope)
-    for t in range(par['ff_iter']):
+    for _ in range(par['ff_iter']):
         state[par['L']//2] = input[0]                        # cell in the upper left corner of the 2D lattice
         state[2*par['L']] = input[1]                   # cell in the upper right corner of the 2D lattice
         state = transfer(np.matmul(NetPar.J,state) + NetPar.B)
@@ -276,15 +278,10 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
     
     ##  EVOLUTION
     for iter in range(par['n_iter']):
-        '''
-        # Save the old solution set for possible early stopping (QUESTO DOVREBBE TRIGGERARE SOLO SE SIAMO IN EARLY STOPPING IN QUESTA ITERAZIONE)
-        if early_stop:
-            solutions_old = []
-            for sol in solutions:
-                solutions_old.append(copy.deepcopy(sol))
-        '''
+
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
+        best_loss = np.min([sol.loss for sol in solutions])
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = np.zeros((int(n_parents/2),2),dtype=int)
         loss = np.array([sol.loss for sol in solutions]) 
@@ -303,17 +300,18 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
-        best_loss = np.min([sol.loss for sol in solutions])
-        if best_loss < 0.1:         # stop random generation if a good solutions has already been found
+        if best_loss < par['rndm_gen_stop']:         # stop random generation if a good solutions has already been found
+        #if np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.8*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
             if not rndm_flag: 
-                print(f'Random generation stopped at iteration #{iter}')
+                print(f'######################## Random generation stopped at iteration #{iter} ###################################')
                 rndm_flag = True
             n_elite = par['N_sol']-n_parents
         else:
             n_elite = int(par['N_sol'] * par['elitist_ratio'])
         # ELITIST CONSERVATION
         offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
-        if not best_loss < 0.1:
+        if not best_loss < par['rndm_gen_stop']:
+        #if not np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.8*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
             # RANDOM GENERATION
             for _ in range(par['N_sol']-n_parents-n_elite):
                 sol = generate(par)
@@ -326,7 +324,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         if stat:
             # Compute the loss
             t_dists = np.zeros(len(solutions))                # Container for target distance for each solution
-            links = np.zeros(len(solutions))                # Container for link costs for each solution
+            weights = np.zeros(len(solutions))                # Container for weights costs for each solution
             asps = np.zeros(len(solutions))
             for s,sol in enumerate(solutions): 
                 _,t_dist, weight = compute_loss(sol,par)
@@ -336,6 +334,13 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 asps[s] = path_cost
                 t_dists[s] = t_dist
                 weights[s] = weight
+            if best_loss < par['add_weights']:
+            #if np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.3*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
+                if not weights_flag: 
+                    print(f"####################### Task solved after {iter} iterations. Now weights cost is introduced. ###########################")
+                    weights_flag = True
+            if weights_flag:                # this if statement is used so that, once the task is solved, the weights cost is part of the loss forever
+                solutions = [NetworkParams(s.J,s.C,s.B,s.G,s.T,s.N,s.loss + weights[n]) for n,s in enumerate(solutions)]    # add the weights cost to the loss
             mean_t_dist_values[iter] = np.mean(t_dists)
             mean_weight_values[iter] = np.mean(weights)
             mean_asp_values[iter] = np.mean(asps)
@@ -350,8 +355,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
-            #print(f'Mean weight cost: {mean_weight}')
+            print(f'Mean target distance: {mean_t_dist_values[iter]}')
+            print(f'Mean weight cost: {mean_weight_values[iter]}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -384,11 +389,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
         #if np.sum(loss_ev[:, iter] < 0.1) >= 0.8*par['N_sol'] and stat:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
-        if best_loss < 0.05:
-            if not weights_flag: 
-                print(f"Task solved after {iter} iterations. Now weights cost is introduced.")
-                weights_flag = True
-            solutions = [NetworkParams(s.J,s.C,s.B,s.G,s.T,s.N,s.loss + weights[n]) for n,s in enumerate(solutions)]    # add the weights cost to the loss
+
         if early_stop:      # very bare-bones version of early stop
             if np.sum(loss_ev[:, iter] < 0.01) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
                 print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
