@@ -40,12 +40,12 @@ def generate(par:dict,verb:bool=False) -> NetworkParams:  # JAXXED!
         NetworkParams: returns the new network's parameters set. 
     """
     N = par['L']**2                                     # fully-populated squared lattice, number of cells = side**2
-    C = nrd.choice(np.arange(2),(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N))      # initialize with a given link density and no self links                                  
-    J = nrd.normal(0,0.25,(N,N)) * C                 
-    #J = np.zeros((N,N))
-    J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
-    B = nrd.normal(0,0.25,size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 0.25 the biases 
-    #B = np.zeros((N))
+    C = nrd.choice([0,1],(N,N),p=(1-par['C_density'],par['C_density'])) * (1-np.eye(N,dtype=int))      # initialize with a given link density and no self links                                  
+    #J = nrd.normal(0,0.25,(N,N)) * C                 
+    J = np.zeros((N,N))
+    #J = np.clip(J, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J       
+    #B = nrd.normal(0,0.25,size=(N))                 # extract from a normal distribution centered in 0 with st. dv. = 0.25 the biases 
+    B = np.zeros((N))
     G = Graph(np.column_stack(np.nonzero(C)))         # Generate the Graph given the connectivity matrix
     T = np.zeros(N)                                 # the transfer function is initialized as a constant 
     NetPar = NetworkParams(J,C,B,G,T,N)              # I don't specify the loss argument so it stays as default (-1)
@@ -69,7 +69,7 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
         output = ff(input,NetPar,par)
         if verb:
             print(f'Input: {input} -> Output: {output}')
-        target_dist = np.abs(par['target_set'][i] - output)                            # square distance between network output and target (theoretical) output
+        target_dist = (par['target_set'][i] - output)**2                            # square distance between network output and target (theoretical) output
    
         if verb:
             print(f'Target distance:{target_dist}')
@@ -81,7 +81,7 @@ def compute_loss(NetPar:NetworkParams,par:dict,verb:bool=False) -> tuple[float,f
     row_diff = row_idx[:, None] - row_idx[None, :]
     col_diff = col_idx[:, None] - col_idx[None, :]
     dist_matrix = np.sqrt(row_diff**2 + col_diff**2)  
-    weights = np.abs(0.15 - np.sum(np.abs(NetPar.J) * dist_matrix)/norm_factor)                # average weights cost (combination of strenght of link and length of link) 
+    weights = np.sum(np.abs(NetPar.J) * dist_matrix)/norm_factor                # average weights cost (combination of strenght of link and length of link) 
     target_dists /= len(par['input_set'])        
     loss = target_dists #+ weights
     return loss, target_dists, weights
@@ -180,7 +180,7 @@ def crossover(par1:NetworkParams,par2:NetworkParams) -> tuple[NetworkParams,Netw
     G2 = Graph(np.column_stack(np.nonzero(C2)))      
     '''
     # Now T crossover
-    cut_idx = nrd.choice(np.arange(len(par1.T)))            # randomly pick where to cut on the gain parameters string      
+    cut_idx = nrd.choice(np.arange(par1.T.shape[0]))            # randomly pick where to cut on the gain parameters string      
     T1 = np.append(par1.T[:cut_idx],par2.T[cut_idx:])  
     T2 = np.append(par2.T[:cut_idx],par1.T[cut_idx:])  
     return (NetworkParams(par1.J,par1.C,par1.B,par1.G,T1,par1.N), NetworkParams(par2.J,par2.C,par2.B,par2.G,T2,par1.N))
@@ -198,39 +198,39 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     """
     # Function to mutate a given network
     ## Mutate C (probability of link inversly proportional to the length of the link)
+    '''
     idx = np.arange(n.N)
     row_idx = idx // par['L']
     col_idx = idx % par['L']
     row_diff = row_idx[:, None] - row_idx[None, :]
     col_diff = col_idx[:, None] - col_idx[None, :]  
     #prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
-    #   par['p_self_link'],np.exp(-0.188*dist_matrix))       # link probability decays exponentially with the distance (from literature, 
-    dist_matrix = np.sqrt(row_diff**2 + col_diff**2)    
+    #   par['p_self_link'],np.exp(-0.188*dist_matrix))       # link probability decays exponentially with the distance (from literature, https://www.sciencedirect.com/science/article/pii/S0896627313006600#sec2 - pag.3) 
+    dist_matrix = np.sqrt(row_diff**2 + col_diff**2) + np.eye(n.N)    # the added identity matrix is only to avoid the warning of a division by zero in the next line
     prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
-    par['p_self_link'],1/dist_matrix)        # link probability decays exponentially with the distance (from literature, 
-                                                                                            # https://www.sciencedirect.com/science/article/pii/S0896627313006600#sec2 - pag.3)
-
-    mutationC = np.where(nrd.binomial(n=1,p=np.array(prob_matrix)),1,0)    # Generate C (binomial distribution with n=1 is the Bernoulli distribution) 
-    C_m = n.C * mutationC   # Apply the mutation
+    par['p_self_link'],1/dist_matrix)   
+    '''
+    prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
+    par['p_self_link'],par['C_flip'])        
+    mutationC = np.where(nrd.binomial(n=1,p=np.array(prob_matrix)),1,0)    # Generate the set of bit flips on C (binomial distribution with n=1 is the Bernoulli distribution) 
+    #C_m = n.C * mutationC   # Apply the mutation
+    C_m = np.abs(n.C - mutationC)
     ## Mutate J
-    mutationJ = par['J_mutation_radius']*nrd.normal(size=n.J.shape)   # mutation as gaussian noise (I multiply for the sd 
-                                                                            # bc JAX only gives the unit normal)                                                                      
+    mutationJ = nrd.normal(scale=par['J_mutation_radius'],size=n.J.shape)   # mutation as gaussian noise                                                                      
     J_m = C_m * (n.J + mutationJ)        # Apply the mutation and eliminate weights for non existing links
     J_m = np.clip(J_m, min(par['J_range']), max(par['J_range']))   # Check the boundary conditions for J
     ## Mutate B
-    mutationB = par['B_mutation_radius']*nrd.normal(size=n.B.shape)   # mutation as gaussian noise (I multiply for the sd 
-                                                                            # bc JAX only gives the unit normal)
+    mutationB = nrd.normal(scale=par['B_mutation_radius'],size=n.B.shape)   # mutation as gaussian noise 
     B_m = n.B + mutationB        # Apply the mutation and eliminate biases for non existing links
     # Mutate the T function
-    mutationT = par['T_mutation_radius']*par['L']*nrd.normal(size=n.T.shape)   # mutation as gaussian noise (I multiply for the sd 
-                                                                            # bc JAX only gives the unit normal)
+    mutationT = nrd.normal(scale=par['T_mutation_radius']*par['L'],size=n.T.shape)   # mutation as gaussian noise 
     T_m = n.T + mutationT        # Apply the mutation 
     G_m = Graph(np.column_stack(np.nonzero(C_m)))     # create a new graph given the mutations
     NetPar = NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N)
     loss_m,_,_ = compute_loss(NetPar,par,verb=gen_verb)
     return NetworkParams(J_m,C_m,B_m,G_m,T_m,n.N,loss_m)
     
-def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop:bool=True) -> tuple[list,list,list,list,list,list,list,list]:
+def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop:bool=True) -> tuple[list,list,list,list,list,list,list,list,list]:
     """Genetic algolrithm for evolving a network population (both the networks and the single nodes).
 
     Args:
@@ -246,10 +246,10 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
     Returns:
         tuple[list,list]: offsprings_list list and mean loss values list.
     """
-    rndm_flag = False           # some flags for avoiding printing warnings multiple times
+    rndm_flag = False           # some flags for avoiding printing messages multiple times
     weights_flag = False
     if par['N_sol'] % 2 != 0:     # N_sol must be even
-        print(f'Error:The number of solutions N_sol must be an even positive number.')
+        print(f'Error:The number of solutions N_sol must be an even positive number. Got instead {par['N_sol']}')
         raise ValueError
     solutions = []              # Generate the initial batch of solutions
     if stat:
@@ -269,10 +269,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         mean_weight_values = np.zeros(par['n_iter'])         # Container for mean link cost
         mean_asp_values = np.zeros(par['n_iter'])                   # Mean average shortest path length over the solutions
         mean_volume = np.zeros(par['n_iter'])                       # Mean volume of links
+        mean_weight = np.zeros(par['n_iter'])                       # Mean volume of weights
         T_values = np.zeros((par['N_sol'],par['L']**2,par['n_iter']))            # Values of the gain parameter for each network's each cell at each iteration
-        mean_t_dist_values[0] = np.mean(t_dists)
-        mean_weight_values[0] = np.mean(weights)
-        Lmean_values[0] = np.sum(np.array([sol.loss for sol in solutions])) / par['N_sol']   # statistics
         loss_ev = np.zeros((par['N_sol'],par['n_iter']))        #store losses
     
     ##  EVOLUTION
@@ -280,7 +278,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
 
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
-        best_loss = np.min([sol.loss for sol in solutions])
+        #best_loss = np.min([sol.loss for sol in solutions])
+        best_t_dist = np.min(t_dist)    
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = np.zeros((int(n_parents/2),2),dtype=int)
         loss = np.array([sol.loss for sol in solutions]) 
@@ -299,18 +298,18 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
-        if best_loss < par['rndm_gen_stop']:         # stop random generation if a good solutions has already been found
+        if best_t_dist < par['rndm_gen_stop'] and weights_flag:         # stop random generation if a good solutions has already been found
         #if np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.8*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
             if not rndm_flag: 
-                print(f'######################## Random generation stopped at iteration #{iter} ###################################')
+                print(f'####################### Random generation stopped at iteration #{iter} ###########################')
                 rndm_flag = True
             n_elite = par['N_sol']-n_parents
+            # ELITIST CONSERVATION
+            offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
         else:
             n_elite = int(par['N_sol'] * par['elitist_ratio'])
-        # ELITIST CONSERVATION
-        offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
-        if not best_loss < par['rndm_gen_stop']:
-        #if not np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.8*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
+            # ELITIST CONSERVATION
+            offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
             # RANDOM GENERATION
             for _ in range(par['N_sol']-n_parents-n_elite):
                 sol = generate(par)
@@ -333,7 +332,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 asps[s] = path_cost
                 t_dists[s] = t_dist
                 weights[s] = weight
-            if best_loss < par['add_weights']:
+            if best_t_dist < par['add_weights']:
             #if np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.3*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
                 if not weights_flag: 
                     print(f"####################### Task solved after {iter} iterations. Now weights cost is introduced. ###########################")
@@ -347,6 +346,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
             Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
             T_values[:,:,iter] = np.array([sol.T for sol in solutions])
+            mean_weight[iter] = np.mean([np.sum(sol.J) for sol in solutions])
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {Lmean_values[iter]}')
@@ -355,9 +355,11 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
+            print(f'Best target distance: {best_t_dist}')
             print(f'Mean target distance: {mean_t_dist_values[iter]}')
-            print(f'Mean weight cost: {mean_weight_values[iter]}')
+            #print(f'Mean weight cost: {mean_weight_values[iter]}')
             print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
+            print(f'Mean Weight:{np.mean([np.sum(sol.J) for sol in solutions])}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -369,9 +371,11 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
+            print(f'Best target distance: {best_t_dist}')
             print(f'Mean target distance: {mean_t_dist_values[iter]}')
+            #print(f'Mean weight cost: {mean_weight_values[iter]}')
             print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
-            print(f'Mean weight cost: {mean_weight_values[iter]}')
+            print(f'Mean Weight:{np.mean([np.sum(sol.J) for sol in solutions])}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
@@ -383,17 +387,17 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,iter], axis=0)}')
             else:
                 print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Cumulative Best loss: {np.min(loss_ev[:,:iter])}')
-            #print(f'Mean target distance: {mean_t_dist}')
-            #print(f'Mean weight cost: {mean_weight}')
+            print(f'Best target distance: {best_t_dist}')
+            print(f'Mean target distance: {mean_t_dist_values[iter]}')
+            #print(f'Mean weight cost: {mean_weight_values[iter]}')
+            print(f'Mean volume: {np.mean([np.sum(sol.C)/sol.N**2 for sol in solutions])}')
+            print(f'Mean Weight:{np.mean([np.sum(sol.J) for sol in solutions])}')
             #print(f'Parents indexes: {parents_idx}')
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
-        #if np.sum(loss_ev[:, iter] < 0.1) >= 0.8*par['N_sol'] and stat:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
-
         if early_stop:      # very bare-bones version of early stop
             if np.sum(loss_ev[:, iter] < 0.01) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
-                print(f"Early stopping at iteration #{iter}: 75% of solutions have loss < 0.01")
+                print(f"Early stopping at iteration #{iter}: {par['early_stop_ratio']*100}% of solutions have loss < 0.01")
                 # Cut statistics arrays at the current iteration
                 Lmean_values = Lmean_values[:iter+1]
                 mean_t_dist_values = mean_t_dist_values[:iter+1]
@@ -403,7 +407,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 T_values = T_values[:, :, :iter+1]
                 break
     if stat:
-        return solutions, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values, mean_volume
+        return solutions, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values, mean_volume, mean_weight
     else:
         return solutions
         
