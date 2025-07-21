@@ -303,10 +303,11 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             if not rndm_flag: 
                 print(f'####################### Random generation stopped at iteration #{iter} ###########################')
                 rndm_flag = True
+        if rndm_flag:       # stop random generation
             n_elite = par['N_sol']-n_parents
             # ELITIST CONSERVATION
             offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
-        else:
+        else:       # random generation
             n_elite = int(par['N_sol'] * par['elitist_ratio'])
             # ELITIST CONSERVATION
             offsprings_list.extend(solutions[:n_elite])         # save the n_elite best individuals to the next generation
@@ -396,7 +397,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             #print(f'Selection Probabilities: {prob}')
             #print(f'Inverse losses: {loss}')
         if early_stop:      # very bare-bones version of early stop
-            if np.sum(loss_ev[:, iter] < 0.01) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
+            if np.sum(loss_ev[:, iter] < 0.1) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
                 print(f"Early stopping at iteration #{iter}: {par['early_stop_ratio']*100}% of solutions have loss < 0.01")
                 # Cut statistics arrays at the current iteration
                 Lmean_values = Lmean_values[:iter+1]
