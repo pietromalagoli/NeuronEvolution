@@ -13,33 +13,36 @@ class Network:
     - Theta: threshold value.
     - J: weight matrix.
     - C: connectivity matrix.
-    - fitness: fitness value of the network.
+    - loss: loss value of the network.
     """
-    def __init__(self):
+    def __init__(self,par:dict):
         self.S = 2                                                  # Initialize with two intra neurons
         self.Theta = np.zeros(2+self.S+1)                           # I instantiate a threshold value for each neuron, even the input, just for consistency of the indexes     
-        self.J = self.initJ()                                       # weight matrix J
-        self.C = self.initJ()                                       # connectivity matrix
+        self.J = self.initJ(par)                                    # weight matrix J
+        self.C = self.initJ(par)                                    # connectivity matrix
         self.activation = lambda x, theta: 0 if x < theta else 1    # activation function (if x = theta -> returns 1)
         self.neurons = np.zeros(2+self.S+1)                         # container for storing the values of the neurons
-        self.fitness = None                                         # Initialize it to None for avoiding recomputation 
+        self.loss = None                                         # Initialize it to None for avoiding recomputation 
         
-    def initJ(self):
+    def initJ(self,par:dict):
         """This method is used to initialize the weight matrix J and the connectivity matrix C to the desired form.
 
         Returns:
             J0 (np.ndarray): mask used to initialize the matrix to the desired form.
+            par(dict): Needed for the bool par['longLinks']. If True, the input layer neurons can link directly to the output neuron. If false, they can link only to the hidden layer.
         """
         # Define the weight matrix J0_ij
         J0 = np.ones((2+self.S+1,2+self.S+1)) # Initialized all to one, so all connnected
-        for j in range(len(J0)):            # First, impose on J0 that the elements on the diagonal must be zero
-            J0[j,j] = 0.
-        J0[0,1] = 0.            # Impose on the weight matrix the fact that nuerons on the same layer cannot be connected 
+        J0 = np.tril(J0,-1)                 # Set the diagonal and the elements above the diagonal to zero
+        J0[0,1] = 0.            # Impose on the weight matrix the fact that neurons on the same layer cannot be connected 
         J0[1,0] = 0.
-        for i in range(2, 2 + self.S):
+        for i in range(2, 2 + self.S):      # Impose on the weight matrix the fact that neurons on the same layer cannot be connected 
             for j in range(2, 2 + self.S):
                 if i != j:
                     J0[i, j] = 0. 
+        if not par['longLinks']:       # Prohibit link from input to output directly
+            J0[-1,0] = 0.
+            J0[-1,1] = 0.
         return J0
     
     def generate(self,par:dict):
@@ -49,10 +52,10 @@ class Network:
         """
         self.S = np.random.choice(par['Sk_range'])      # Generate S
         self.Theta = np.random.uniform(par['Theta_range'][0],par['Theta_range'][1],2+self.S+1) # Generate the set of thresholds, Theta
-        self.J = self.initJ() * np.random.uniform(par['J_range'][0],par['J_range'][1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))   # Generate the weight matrix, J
+        self.J = self.initJ(par) * np.random.uniform(par['J_range'][0],par['J_range'][1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))   # Generate the weight matrix, J
         self.neurons = np.zeros(2+self.S+1)     # Initialize the values of the neurons (the lenght of this array depends on S)
-        self.C = self.initJ() * np.random.choice([0,1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))    # I SHOULD MAKE IT SYMMETRIC    
-        self.compute_fitness(par)               # Already compute the fitness value of the network
+        self.C = self.initJ(par) * np.random.choice([0,1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))    # I SHOULD MAKE IT SYMMETRIC    
+        self.compute_loss(par)               # Already compute the loss value of the network
         
     def ff(self,input:list,verb:int=0): # feed-forward
         """Compute the output of the network by feed-forward, given an input.
@@ -75,20 +78,20 @@ class Network:
             return self.neurons
         return output
         
-    def compute_fitness(self,par:dict):
-        """Compute the output of the network and from that the fitness value 
-            and with that updates the network's fitness value.
+    def compute_loss(self,par:dict):
+        """Compute the output of the network and from that the loss value 
+            and with that updates the network's loss value.
         Args:
             par (dict): parameters of the generation.
         """
-        if self.fitness == None:        # I need this check, bc otherwise I risk adding fitness over fitness
-            self.fitness = 0.           # This is to avoid type conflict and to make sure that I'm not computing the fitness of a network that already has it
+        if self.loss == None:        # I need this check, bc otherwise I risk adding loss over loss
+            self.loss = 0.           # This is to avoid type conflict and to make sure that I'm not computing the loss of a network that already has it
             for i,input in enumerate(par['input_set']):
                 output = self.ff(input)
                 squared_dist = (par['target_set'][i] - output)**2     # square distance between network output and target (theoretical) output
-                cost = (np.sum(self.C.flatten())/2) * self.S      # here the cost is computed only on the presence or absence of links
-                self.fitness += 50*squared_dist + cost # add to the fitness value of the network
-            self.fitness /= len(par['input_set'])    # normalize over the inputs
+                cost = (np.sum(self.C.flatten())) * self.S      # here the cost is computed only on the presence or absence of links
+                self.loss += 50*squared_dist + cost # add to the loss value of the network
+            self.loss /= len(par['input_set'])    # normalize over the inputs
             
 ####### EVOLUTION ###########
 def evolution(par:dict,verb:int=1,early_stop:bool=True):
@@ -101,30 +104,31 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         early_stop (bool, optional): early stopping option. Defaults to True.
 
     Returns:
-        solutions, Fmean_values (np.ndarray): solutions = array of the final solutions of the algorithm. Fmean_values = array of mean fitness values for each iteration.
+        solutions, Fmean_values (np.ndarray): solutions = array of the final solutions of the algorithm. Fmean_values = array of mean loss values for each iteration.
     """
     # Generate the solutions
     solutions = []
     for _ in range(par['N_sol']):
         # Generate a solution
-        n = Network()
-        n.generate(par)     # already computes also the fitness value
+        n = Network(par)
+        n.generate(par)     # already computes also the loss value
         solutions.append(n)
     solutions = np.array(solutions)
     # Initiate some container for statistic
     Fmean_values = []
     S_values = []
+    bestLs = []
     
     ##  EVOLUTION
     for iter in range(par['n_iter']):
-        # Compute the mean fitness
-        mean_fit = np.sum([sol.fitness for sol in solutions]) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_fitness method
+        # Compute the mean loss
+        mean_loss = np.sum([sol.loss for sol in solutions]) / par['N_sol']    # Here I don't have to divide also by 4, because I've already done it in the compute_loss method
         # Save the old solution set for possible early stopping
         solutions_old = []
         for sol in solutions:
             solutions_old.append(copy.deepcopy(sol))
-        # Discard elements in sol whose fitness value is below average 
-        solutions = np.array([sol for sol in solutions if sol.fitness <= mean_fit])  
+        # Discard elements in sol whose loss value is above average 
+        solutions = np.array([sol for sol in solutions if sol.loss <= mean_loss])  
         # Compute the number of discarded elements, m
         m = par['N_sol'] - len(solutions)
         # Extract the parents between the survivors (here we can either take them random or take the fittest survivors)
@@ -145,8 +149,8 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         # Possible early stopping
         if len(offspring) <= par['n_early_stop'] and early_stop == True:
             print(f'Convergence reached after {iter} iterations.')
-            return solutions_old, Fmean_values
-                
+            return solutions_old, Fmean_values, S_values, bestLs
+                 
         ## MUTATION
         for i,child in enumerate(offspring):
             ## Now, mutate S first
@@ -178,7 +182,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
                     child.Theta[i] = max(par['Theta_range'])  
             ## Mutate C
             # first check for S
-            C0 = child.initJ()     # I utilize the method initJ() to create a new C given the new S
+            C0 = child.initJ(par)     # I utilize the method initJ() to create a new C given the new S
             if deltaS > 0:
                 for _ in range(deltaS):
                     c = np.random.choice([0,1])  # generate a random value to be given to the new links
@@ -193,7 +197,7 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
             # Apply the mutation
             child.C = C0 * mutationC
             ## Mutate J
-            J0 = child.initJ()     # I utilize the method initJ() to create a new J given the new S
+            J0 = child.initJ(par)     # I utilize the method initJ() to create a new J given the new S
             if deltaS > 0:
                 for _ in range(deltaS):
                     j = np.random.uniform(par['J_range'][0],par['J_range'][1])  # generate a random value to be given to the new links
@@ -222,9 +226,9 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
                 child.neurons = np.insert(child.neurons,obj=-1,values=value)      # i set the new neuron to either 0 or 1, uniformly
             elif deltaS < 0:
                 np.delete(child.neurons,2+child.S,deltaS)   # delete the eliminated intra neurons
-            # Already compute the fitness value of the network
-            child.fitness = None            # I have to first set it to None beacuse child inherits self.fitness from the parent
-            child.compute_fitness(par)      # Here I have to do it explicitly because I'm not generating the Network object through Network.generate()       
+            # Already compute the loss value of the network
+            child.loss = None            # I have to first set it to None beacuse child inherits self.loss from the parent
+            child.compute_loss(par)      # Here I have to do it explicitly because I'm not generating the Network object through Network.generate()       
         # Add the offsprings generated by mutation to the survived solutions
         solutions = np.concatenate([solutions,offspring])
         # Randomly generate the remaining individuals (population must be constant)
@@ -232,8 +236,8 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         generated = []
         for _ in range(n_generation):
             # Generate a solution
-            n = Network()
-            n.generate(par)             # already with computed fitness
+            n = Network(par)
+            n.generate(par)             # already with computed loss
             generated.append(n)
         generated = np.array(generated)     # transform it to a np.ndarray
         # Add the randomly generated solutions to the other solutions
@@ -245,7 +249,8 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         # Shuffle the order of the solutions for good measure
         np.random.shuffle(solutions)
         # Statistic 
+        bestLs.append(np.min([sol.loss for sol in solutions])) # best loss in the population
         meanS = np.mean([sol.S for sol in solutions])
-        Fmean_values.append(mean_fit)
+        Fmean_values.append(mean_loss)
         S_values.append(meanS)
-    return solutions, Fmean_values
+    return solutions, Fmean_values, S_values, bestLs

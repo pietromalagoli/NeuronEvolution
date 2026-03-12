@@ -32,6 +32,7 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
     mutation_radius = par['mutation_radius']
     seed = par['seed']
     n_iter = par['n_iter']
+    eps = par['eps']
 
     x = np.linspace(coord_range[0],coord_range[1],N)
     y = np.linspace(coord_range[0],coord_range[1],N)
@@ -51,7 +52,9 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
     sol = np.array([(xx, yy) for xx, yy in zip(X[idx, idx], Y[idy, idy])]).view(SolutionArray)
     
     # plot the generation
-    plot_generation(sol,title=f'Initial generation',X=X,Y=Y,f=f,func_par=func_par)
+    plot_generation(sol,title=f'Initial generation',X=X,Y=Y,f=f,func_par=func_par,path='plots/initial.png')
+    
+    flag = False
     
     for iter in range(n_iter):
         if iter % 10 == 0:  # print the iteration number each 10 iterations
@@ -62,6 +65,11 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
         running_maxima = np.max(f(sol.x,sol.y,func_par))
         mean_ev[iter] = running_mean
         max_ev[iter] = running_maxima
+        
+        # Add an early stopping
+        if np.isclose(running_mean,np.max(f(X,Y,func_par)),atol=eps) and np.isclose(running_mean,np.array(mean_ev[iter-5:iter-1]).all(),atol=5*eps):
+            print(f'Convergence reached after {iter} iterations.')
+            break
 
         # discard elements in sol whose fitness value is below average
         sol = sol[f(sol.x,sol.y,func_par) >= running_mean]
@@ -75,7 +83,7 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
         
         # Extract the parents between the survivors (here we can either take them random or take the fittest survivors)
         # randomly
-        parents_idx = np.random.randint(0,len(sol),m)
+        parents_idx = np.random.randint(0,len(sol),m) # with repetition
         parentsx = sol.x[parents_idx]
         parentsy = sol.y[parents_idx]
 
@@ -89,26 +97,34 @@ def ep2d(f,par:dict,func_par:dict,verb:int=0):
         
         offspring = np.array([[xx,yy] for xx,yy in zip(offspringx,offspringy)])
 
+        # [New sol] = [survivors] + [offsprings]
         sol = np.concatenate([sol,offspring]).view(SolutionArray)
 
         if verb > 0:
             # Plot generation function
-            plot_generation(sol,title=f'Generation #{iter+1} \n mean={running_mean}',X=X,Y=Y,f=f,func_par=func_par)
+            plot_generation(sol,title=f'Generation #{iter+1} \n mean={running_mean:.4f}',X=X,Y=Y,f=f,func_par=func_par)
         
-        # Add an early stopping
-        if np.isclose(running_mean,np.max(f(X,Y,func_par)),atol=1e-2) and np.isclose(running_mean,np.array(mean_ev[iter-5:iter-1]).all(),atol=1e-3):
-            break
+        if np.abs(running_mean - np.max(f(X,Y,func_par))) <=0.1 and not flag:
+            flag = True
+            plot_generation(sol,title=f'Generation #{iter+1} \n mean={running_mean:.4f}',X=X,Y=Y,f=f,func_par=func_par)
     
     # in the case of early stopping, cut the mean and max arrays at the stopped iteration
     mean_ev = mean_ev[:iter]
     max_ev = max_ev[:iter]
     
-    print(f'Convergence reached after {iter} iterations.')
-    plot_generation(sol,title=f'Generation #{iter} \n mean={running_mean}',X=X,Y=Y,f=f,func_par=func_par)
+    # Check for convergence on the last iteration
+    if np.isclose(running_mean,np.max(f(X,Y,func_par)),atol=eps) and np.isclose(running_mean,np.array(mean_ev[iter-5:iter-1]).all(),atol=5*eps):
+        print(f'Convergence reached after {iter} iterations.')
+    else:
+        print(f'Maximum number of iterations ({n_iter}) reached.')
+        plot_generation(sol,title=f'Generation #{iter} \n mean={running_mean:.4f} (not converged)',X=X,Y=Y,f=f,func_par=func_par,path='plots/final.png')
+        return mean_ev, max_ev
+    
+    plot_generation(sol,title=f'Generation #{iter} \n mean={running_mean:.4f} (converged)',X=X,Y=Y,f=f,func_par=func_par,path='plots/final.png')
     return mean_ev, max_ev
         
 # Function for plotting the generation
-def plot_generation(sol:SolutionArray,title:str,X,Y,f,func_par:dict=None):
+def plot_generation(sol:SolutionArray,title:str,X,Y,f,func_par:dict=None,path:str='plots/plot.png'):
     
     fig= plt.figure(figsize=(12,6))
     fig.suptitle(title)
@@ -146,6 +162,7 @@ def plot_generation(sol:SolutionArray,title:str,X,Y,f,func_par:dict=None):
             marker='x', c='black', label='Global Max')
     # Add a color bar which maps values to colors.
     fig.colorbar(contour, shrink=0.5, aspect=5,label='f(X,Y)')
-
-    plt.legend()
+    
+    plt.legend(loc='upper right')
+    plt.savefig(path)
     plt.show()
