@@ -51,7 +51,7 @@ class Network:
             par (dict, optional): parameters of the generation.
         """
         self.S = np.random.choice(par['Sk_range'])      # Generate S
-        self.Theta = np.random.uniform(par['Theta_range'][0],par['Theta_range'][1],2+self.S+1) # Generate the set of thresholds, Theta
+        self.Theta = np.random.uniform(par['Theta_range'][0],par['Theta_range'][1],2+self.S+1) # Generate the set of thresholds, Theta. 
         self.J = self.initJ(par) * np.random.uniform(par['J_range'][0],par['J_range'][1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))   # Generate the weight matrix, J
         self.neurons = np.zeros(2+self.S+1)     # Initialize the values of the neurons (the lenght of this array depends on S)
         self.C = self.initJ(par) * np.random.choice([0,1],(2+self.S+1)**2).reshape((2+self.S+1,2+self.S+1))    # I SHOULD MAKE IT SYMMETRIC    
@@ -90,9 +90,24 @@ class Network:
                 output = self.ff(input)
                 squared_dist = (par['target_set'][i] - output)**2     # square distance between network output and target (theoretical) output
                 cost = (np.sum(self.C.flatten())) * self.S      # here the cost is computed only on the presence or absence of links
-                self.loss += 50*squared_dist + cost # add to the loss value of the network
+                self.loss += par['alpha']*squared_dist + cost # add to the loss value of the network
             self.loss /= len(par['input_set'])    # normalize over the inputs
-            
+    
+def compute_score(n,par):
+    """Compute the output of a network and from that the score value 
+        and with that updates the network's loss value.
+    Args:
+        par (dict): parameters of the generation.
+    Returns:
+        score (float): score of the network on the given task.
+    """
+    
+    score = 0.           # This is to avoid type conflict and to make sure that I'm not computing the loss of a network that already has it
+    for i,input in enumerate(par['input_set']):
+        output = n.ff(input)
+        score += (par['target_set'][i] - output)**2     # square distance between network output and target (theoretical) output
+    return score / len(par['input_set'])    # normalize over the inputs  
+        
 ####### EVOLUTION ###########
 def evolution(par:dict,verb:int=1,early_stop:bool=True):
     """This function implements the evolutionary algorithm utilizied to evolve the networks population.
@@ -118,6 +133,8 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
     Fmean_values = []
     S_values = []
     bestLs = []
+    meanT = np.zeros((2,par['n_iter'])) # container for the mean value of theta for the mean of the hidden layer neurons (row 0) and thh output neuron (row 1)
+    Ndiscards = np.zeros(par['n_iter'])     # container for the number of discarded elements at each iteration
     
     ##  EVOLUTION
     for iter in range(par['n_iter']):
@@ -146,10 +163,6 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         elif iter%10 == 0 and verb == 2:
             print(f'Iteration #{iter}...')
             print(f'# of childs: {len(offspring)}')
-        # Possible early stopping
-        if len(offspring) <= par['n_early_stop'] and early_stop == True:
-            print(f'Convergence reached after {iter} iterations.')
-            return solutions_old, Fmean_values, S_values, bestLs
                  
         ## MUTATION
         for i,child in enumerate(offspring):
@@ -171,11 +184,11 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
             elif deltaS < 0: # i.e. S decrease
                 for _ in range(np.abs(deltaS)):
                     child.Theta = np.delete(child.Theta,obj=-1) # delete the theta values of the deleted neurons
-            # mutate theta (I mutate also the newly generated thetas)
-            mutationTheta = np.random.normal(0.,par['Theta_mutation_radius'],len(child.Theta))  # mutation as gaussian noise 
-            child.Theta += mutationTheta
+            # mutate theta (I mutate also the newly generated thetas, but not the input neurons' thetas, since they have (by definition of NN) no activation function)
+            mutationTheta = np.random.normal(0.,par['Theta_mutation_radius'],child.S+1)  # mutation as gaussian noise (not mutate inputs' thetas)
+            child.Theta[2:] += mutationTheta    # (not mutate inputs' thetas)
             # Check the boundary conditions for Theta
-            for i,theta in enumerate(child.Theta):
+            for i,theta in enumerate(child.Theta[2:]):      # check on all but inputs' thetas
                 if theta < min(par['Theta_range']):
                     child.Theta[i] = min(par['Theta_range'])
                 if theta > max(par['Theta_range']):
@@ -253,4 +266,14 @@ def evolution(par:dict,verb:int=1,early_stop:bool=True):
         meanS = np.mean([sol.S for sol in solutions])
         Fmean_values.append(mean_loss)
         S_values.append(meanS)
-    return solutions, Fmean_values, S_values, bestLs
+        meanT[0,iter] = np.mean(([np.mean(sol.Theta[2:-1]) for sol in solutions]))       # mean of the thetas of the mean thetas on the hidden layer
+        meanT[1,iter] = np.mean([sol.Theta[-1] for sol in solutions],axis=0)             # mean of the thetas on the output neuron
+        Ndiscards[iter] = m/par['N_sol']         # number of discarded individuals at each iteration (it's kinda of a measure of variance on the population)
+        # Possible early stopping
+        if early_stop:
+            mean_score = np.mean([compute_score(sol,par) for sol in solutions])
+            if len(offspring) <= par['n_early_stop'] and mean_score < 0.01:
+                print(f'Convergence reached after {iter} iterations with mean score {mean_score} .')
+                return solutions_old, Fmean_values, S_values, bestLs, meanT[:,:iter], Ndiscards[:iter]
+        
+    return solutions, Fmean_values, S_values, bestLs, meanT, Ndiscards

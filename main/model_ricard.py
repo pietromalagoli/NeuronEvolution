@@ -210,11 +210,10 @@ def mutation(n:NetworkParams,par:dict,gen_verb:bool=False) -> NetworkParams:
     prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
     par['p_self_link'],1/dist_matrix)   
     '''
-    prob_matrix = np.where(np.eye(n.N, dtype=bool),  # Create the probability matrix for connectivity
-    par['p_self_link'],par['C_flip'])        
+    prob_matrix = np.where(np.eye(n.N, dtype=bool),par['p_self_link'],par['C_flip'])   # Create the probability matrix for connectivity     
     mutationC = np.where(nrd.binomial(n=1,p=np.array(prob_matrix)),1,0)    # Generate the set of bit flips on C (binomial distribution with n=1 is the Bernoulli distribution) 
-    #C_m = n.C * mutationC   # Apply the mutation
-    C_m = np.abs(n.C - mutationC)
+    #C_m = n.C * mutationC   
+    C_m = np.abs(n.C - mutationC)  # Apply the mutation
     ## Mutate J
     mutationJ = nrd.normal(scale=par['J_mutation_radius'],size=n.J.shape)   # mutation as gaussian noise                                                                      
     J_m = C_m * (n.J + mutationJ)        # Apply the mutation and eliminate weights for non existing links
@@ -279,7 +278,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         # SELECTION
         solutions = sorted(solutions, key=lambda sol: sol.loss)    # sort in ascending order based on loss
         #best_loss = np.min([sol.loss for sol in solutions])
-        best_t_dist = np.min(t_dist)    
+        if stat:
+            best_t_dist = np.min(t_dist)    
         n_parents = int(np.floor(par['N_sol'] * par['reproduction_ratio'])-np.floor(par['N_sol'] * par['reproduction_ratio'])%2)  # the 2nd floor assures that n_parents is even
         parents_idx = np.zeros((int(n_parents/2),2),dtype=int)
         loss = np.array([sol.loss for sol in solutions]) 
@@ -298,7 +298,8 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             offsprings_list.append(offspring0)          # add them to the new population
             offspring1 = mutation(children[1],par,gen_verb=gen_verb)
             offsprings_list.append(offspring1)          # add them to the new population
-        if best_t_dist < par['rndm_gen_stop'] and weights_flag:         # stop random generation if a good solutions has already been found
+        #if best_t_dist < par['rndm_gen_stop'] and weights_flag:         # stop random generation if a good solutions has already been found
+        if np.min(loss) < par['rndm_gen_stop'] and weights_flag:        # check the loss instead of only the target distance 
         #if np.sum(np.array([s.loss for s in solutions]) < 0.01) >= 0.8*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
             if not rndm_flag: 
                 print(f'####################### Random generation stopped at iteration #{iter} ###########################')
@@ -320,7 +321,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
         if len(offsprings_list) != par['N_sol']:      # check population conservation
             print(f'Error: population not conserved; mismatching number of individuals between old and new populations. Got {len(offsprings_list)}, expected {len(t_dists)}')
             raise ValueError
-        if stat:
+        if stat or 1:  # for now, this must always be true (thatt's why I added the 'or 1', but it should be fixed)
             # Compute the loss
             t_dists = np.zeros(len(solutions))                # Container for target distance for each solution
             weights = np.zeros(len(solutions))                # Container for weights costs for each solution
@@ -338,6 +339,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 if not weights_flag: 
                     print(f"####################### Task solved after {iter} iterations. Now weights cost is introduced. ###########################")
                     weights_flag = True
+                    t_full_loss = iter
             if weights_flag:                # this if statement is used so that, once the task is solved, the weights cost is part of the loss forever
                 solutions = [NetworkParams(s.J,s.C,s.B,s.G,s.T,s.N,s.loss + weights[n]) for n,s in enumerate(solutions)]    # add the weights cost to the loss
             mean_t_dist_values[iter] = np.mean(t_dists)
@@ -347,7 +349,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
             Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
             T_values[:,:,iter] = np.array([sol.T for sol in solutions])
-            mean_weight[iter] = np.mean([np.sum(sol.J) for sol in solutions])
+            mean_weight[iter] = np.mean([sol.J for sol in solutions],axis=(0,1))
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {Lmean_values[iter]}')
@@ -398,7 +400,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             #print(f'Inverse losses: {loss}')
         if early_stop:      # very bare-bones version of early stop
             if np.sum(loss_ev[:, iter] < 0.1) >= par['early_stop_ratio']*par['N_sol']:        # check if at least the par['early_stop_ratio'] solutions have loss lower than 0.01
-                print(f"Early stopping at iteration #{iter}: {par['early_stop_ratio']*100}% of solutions have loss < 0.01")
+                print(f"Early stopping at iteration #{iter}: {par['early_stop_ratio']*100}% of solutions have loss < 0.1")
                 # Cut statistics arrays at the current iteration
                 Lmean_values = Lmean_values[:iter+1]
                 mean_t_dist_values = mean_t_dist_values[:iter+1]
@@ -408,7 +410,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
                 T_values = T_values[:, :, :iter+1]
                 break
     if stat:
-        return solutions, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values, mean_volume, mean_weight
+        return solutions, Lmean_values, mean_t_dist_values, mean_weight_values, loss_ev, mean_asp_values, T_values, mean_volume, mean_weight, t_full_loss
     else:
         return solutions
         
