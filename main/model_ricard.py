@@ -349,7 +349,7 @@ def evolution(par:dict,verb:int=1,gen_verb:bool=False,stat:bool=False,early_stop
             loss_ev[:,iter] = np.array([sol.loss for sol in solutions])
             Lmean_values[iter] = np.mean(loss_ev[:,iter])  # statistics
             T_values[:,:,iter] = np.array([sol.T for sol in solutions])
-            mean_weight[iter] = np.mean([sol.J for sol in solutions],axis=(0,1))
+            mean_weight[iter] = np.mean([np.sum(sol.J) for sol in solutions])
         if iter%100 == 0 and verb == 1:
             print(f'Iteration #{iter}...')
             print(f'Mean loss: {Lmean_values[iter]}')
